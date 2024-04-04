@@ -13,7 +13,7 @@ func InitRouter() *gin.Engine{
 
 	repository := repository.NewShortenerRepository()
 
-	shortenerService:= service.NewShortenerService("http://localhost:8080/", *repository)
+	shortenerService:= service.NewShortenerService("http://localhost:8080/", repository)
 	shortenerController := controller.NewShortenerController(*shortenerService)
 
 	r.POST("/shorten", shortenerController.Shorten)

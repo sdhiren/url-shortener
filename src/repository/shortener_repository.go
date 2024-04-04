@@ -2,29 +2,34 @@ package repository
 
 import (
 	"context"
-	"fmt"
 )
 
+//go:generate mockgen -source=shortener_repository.go -destination=mocks/shortener_repository_mock.go -package=mocks
 
-type ShortenerRepository struct {
+type ShortenerRepository interface {
+	SaveShotenedURL(context context.Context, url, shortenedURL string) bool
+	GetOriginalURL(context context.Context, shortenedURL string) string 
+}
+
+type shortenerRepository struct {
 	Cache map[string]string
 
 }
- func NewShortenerRepository() *ShortenerRepository {
+
+ func NewShortenerRepository() ShortenerRepository {
 	cache := make(map[string]string)
-	return &ShortenerRepository{Cache: cache}
+	return &shortenerRepository{Cache: cache}
  }
 
- func (sr *ShortenerRepository) SaveShotenedURL(context context.Context, url, shortenedURL string) bool{
+ func (sr *shortenerRepository) SaveShotenedURL(context context.Context, url, shortenedURL string) bool{
 	if _, ok := sr.Cache[shortenedURL]; !ok {
 		sr.Cache[shortenedURL] = url
-		fmt.Println("cache data :", sr.Cache)
 		return true
 	}
 	return false
  }
  
- func (sr *ShortenerRepository) GetOriginalURL(context context.Context, shortenedURL string) string {
+ func (sr *shortenerRepository) GetOriginalURL(context context.Context, shortenedURL string) string {
 	if val, ok := sr.Cache[shortenedURL]; ok {
 		return val
 	}
