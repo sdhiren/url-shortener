@@ -2,6 +2,7 @@ package router
 
 import (
 	"urlshortener/src/controller"
+	"urlshortener/src/repository"
 	"urlshortener/src/service"
 
 	"github.com/gin-gonic/gin"
@@ -9,10 +10,14 @@ import (
 
 func InitRouter() *gin.Engine{
 	r := gin.Default()
-	shortenerService:= service.NewShortenerService("http://localhost:8080/")
+
+	repository := repository.NewShortenerRepository()
+
+	shortenerService:= service.NewShortenerService("http://localhost:8080/", *repository)
 	shortenerController := controller.NewShortenerController(*shortenerService)
 
 	r.POST("/shorten", shortenerController.Shorten)
+	r.GET("/url/:url", shortenerController.Redirect)
 
 	return r
 }

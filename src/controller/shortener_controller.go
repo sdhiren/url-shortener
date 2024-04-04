@@ -20,8 +20,15 @@ func (sc *ShortenerController) Shorten(c *gin.Context){
 
 	var shortenURLRequest model.ShortenURLRequest
 	c.ShouldBind(&shortenURLRequest)
-
 	shortenUrl := sc.service.Shorten(c, shortenURLRequest)
 
 	c.JSON(http.StatusOK, shortenUrl)
+}
+
+func (sc *ShortenerController) Redirect(c *gin.Context){
+
+	url := c.Param("url")
+	originalUrl := sc.service.GetOriginalURL(c, url)
+
+	c.JSON(http.StatusOK, originalUrl)
 }

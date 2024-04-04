@@ -1,6 +1,9 @@
 package repository
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 
 type ShortenerRepository struct {
@@ -8,12 +11,14 @@ type ShortenerRepository struct {
 
 }
  func NewShortenerRepository() *ShortenerRepository {
-	return &ShortenerRepository{}
+	cache := make(map[string]string)
+	return &ShortenerRepository{Cache: cache}
  }
 
  func (sr *ShortenerRepository) SaveShotenedURL(context context.Context, url, shortenedURL string) bool{
-	if val, ok := sr.Cache[shortenedURL]; !ok {
-		sr.Cache[shortenedURL] = val
+	if _, ok := sr.Cache[shortenedURL]; !ok {
+		sr.Cache[shortenedURL] = url
+		fmt.Println("cache data :", sr.Cache)
 		return true
 	}
 	return false
