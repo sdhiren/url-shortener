@@ -9,7 +9,7 @@ import (
 
 func InitRouter() *gin.Engine{
 	r := gin.Default()
-	shortenerService:= service.NewShortenerService()
+	shortenerService:= service.NewShortenerService("http://localhost:8080/")
 	shortenerController := controller.NewShortenerController(*shortenerService)
 
 	r.POST("/shorten", shortenerController.Shorten)
