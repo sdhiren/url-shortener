@@ -1,0 +1,28 @@
+version: '3.8'
+services:
+  url-shortener-api:    
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    networks:
+      - mynetwork
+
+  db:
+    image: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: primus
+      POSTGRES_PASSWORD: c3xs1bs#123
+      POSTGRES_DB: main
+
+volumes:
+  postgres_data:
+
+networks:
+  mynetwork:
+    driver: bridge
