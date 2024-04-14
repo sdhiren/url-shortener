@@ -9,3 +9,6 @@ stop:
 
 stopv:
 	docker-compose down --volumes
+
+migrate:
+    liquibase --defaultsFile=liquibase.properties update

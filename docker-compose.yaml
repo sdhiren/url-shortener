@@ -17,8 +17,32 @@ services:
       - postgres_data:/var/lib/postgresql/data
     environment:
       POSTGRES_USER: primus
-      POSTGRES_PASSWORD: c3xs1bs#123
+      POSTGRES_PASSWORD: c3xs1bs$123
       POSTGRES_DB: main
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U primus -d main -h localhost"]
+      interval: 10s
+      retries: 5
+      timeout: 5s
+    networks:
+      - mynetwork
+  
+  liquibase:
+    # Image to be pulled from Docker Hub
+    image: liquibase/liquibase:4.9.1
+    # Name of the container
+    container_name: Liquibase_container
+    # Setting depends_on to PostgreSQL container to wait till the service is ready to accept connections
+    depends_on:
+      db:
+        condition: service_healthy
+    # Volume to add the liquibase collection of scripts
+    volumes:
+      - ./infrastructure/changelog/:/liquibase/changelog/
+    # Command to run the liquibase update service
+    command: --defaults-file=/liquibase/changelog/liquibase.properties update
+    networks:
+      - mynetwork
 
 volumes:
   postgres_data:
