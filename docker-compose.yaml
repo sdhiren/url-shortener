@@ -1,14 +1,5 @@
 version: '3.8'
 services:
-  url-shortener-api:    
-    build:
-      context: .
-      dockerfile: Dockerfile
-    ports:
-      - "8080:8080"
-    networks:
-      - mynetwork
-
   db:
     image: postgres
     ports:
@@ -26,6 +17,20 @@ services:
       timeout: 5s
     networks:
       - mynetwork
+  
+  url-shortener-api:    
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    networks:
+      - mynetwork
+    env_file:
+      - .envrc
+    depends_on:
+      db:
+        condition: service_healthy
   
   liquibase:
     # Image to be pulled from Docker Hub

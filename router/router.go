@@ -1,6 +1,7 @@
 package router
 
 import (
+	"database/sql"
 	"urlshortener/src/controller"
 	"urlshortener/src/repository"
 	"urlshortener/src/service"
@@ -8,10 +9,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func InitRouter() *gin.Engine{
+func InitRouter(db *sql.DB) *gin.Engine{
 	r := gin.Default()
 
-	repository := repository.NewShortenerRepository()
+	repository := repository.NewShortenerRepository(db)
 
 	shortenerService:= service.NewShortenerService("http://localhost:8080/", repository)
 	shortenerController := controller.NewShortenerController(*shortenerService)

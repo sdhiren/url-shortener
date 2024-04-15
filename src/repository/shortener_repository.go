@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 )
 
 //go:generate mockgen -source=shortener_repository.go -destination=mocks/shortener_repository_mock.go -package=mocks
@@ -13,12 +14,13 @@ type ShortenerRepository interface {
 
 type shortenerRepository struct {
 	Cache map[string]string
+	db *sql.DB
 
 }
 
- func NewShortenerRepository() ShortenerRepository {
+ func NewShortenerRepository(db *sql.DB) ShortenerRepository {
 	cache := make(map[string]string)
-	return &shortenerRepository{Cache: cache}
+	return &shortenerRepository{Cache: cache, db: db}
  }
 
  func (sr *shortenerRepository) SaveShotenedURL(context context.Context, url, shortenedURL string) bool{
