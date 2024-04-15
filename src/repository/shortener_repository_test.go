@@ -11,10 +11,10 @@ func Test_shortenerRepository_SaveShotenedURL(t *testing.T) {
 		cache map[string]string
 		url   string
 		shortenedUrl string
-		want   bool
+		want   error
 	}{
-		{"key does not exist", map[string]string{"key1": "value1"}, "www.test.com", "WzadtdDb",  true},
-		{"key exists", map[string]string{"Rgdt4Gt5": "www.test2.com"}, "www.test2.com", "Rgdt4Gt5",  false},
+		{"key does not exist", map[string]string{"key1": "value1"}, "www.test.com", "WzadtdDb",  nil},
+		{"key exists", map[string]string{"Rgdt4Gt5": "www.test2.com"}, "www.test2.com", "Rgdt4Gt5",  nil},
 	}
 
 	context := context.TODO()
@@ -48,7 +48,7 @@ func Test_shortenerRepository_GetOriginalURL(t *testing.T) {
 			sr := &shortenerRepository{
 				Cache: tt.cache,
 			}
-			if got := sr.GetOriginalURL(context, tt.shortenedUrl); got != tt.want {
+			if got, _ := sr.GetOriginalURL(context, tt.shortenedUrl); got != tt.want {
 				t.Errorf("shortenerRepository.GetOriginalURL() = %v, want %v", got, tt.want)
 			}
 		})
