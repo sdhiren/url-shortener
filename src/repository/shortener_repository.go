@@ -9,6 +9,7 @@ import (
 type URL struct {
 	long_url string `db:"LONG_URL"`
 	short_url string `db:"SHORT_URL"`
+	counter_value int `db:"COUNTER_VALUE"`
 }
 
 //go:generate mockgen -source=shortener_repository.go -destination=mocks/shortener_repository_mock.go -package=mocks
@@ -56,6 +57,7 @@ type shortenerRepository struct {
 	url := URL{}
 	result := sr.db.QueryRow("SELECT LONG_URL FROM URLS WHERE SHORT_URL = $1", shortenedURL)
 
+
 	err := result.Scan(&url.long_url)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -73,9 +75,9 @@ type shortenerRepository struct {
  func (sr *shortenerRepository) IfURLAlreadyExists(context context.Context, long_url string) (string, error) {
 
 	url := URL{}
-	result := sr.db.QueryRow("SELECT SHORT_URL FROM URLS WHERE LONG_URL = $1", long_url)
+	result := sr.db.QueryRow("SELECT SHORT_URL, COUNTER_VALUE FROM URLS WHERE LONG_URL = $1", long_url)
 	
-	err := result.Scan(&url.short_url)
+	err := result.Scan(&url.short_url, &url.counter_value)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			fmt.Println("no record present")
@@ -86,5 +88,29 @@ type shortenerRepository struct {
 		}
 	}
 
+	// update the counter using a goroutine
+	go sr.updateCounter(url.short_url, url.counter_value)
+
 	return url.short_url, nil
+ }
+ 
+ func (sr *shortenerRepository) updateCounter(short_url string, counter_value int) (error) {
+
+	// prepare the update sql statement
+	stmt, err := sr.db.Prepare("UPDATE URLS SET COUNTER_VALUE = $1 WHERE SHORT_URL = $2")
+    if err != nil {
+        fmt.Println("error occurred while updating the counter: ", err)
+		return err
+    }
+    defer stmt.Close()
+
+    // Execute the SQL statement
+    _, err = stmt.Exec(counter_value + 1, short_url)
+    if err != nil {
+        fmt.Println("update Error :",err)
+		return err
+    }
+
+    fmt.Println("counter updated successful")
+	return nil
  }
