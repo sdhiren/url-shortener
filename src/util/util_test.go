@@ -18,8 +18,10 @@ func TestGenerateShortURL(t *testing.T) {
 		{"https://www.google.co.in", "PYyy3Gja"},
 	}
 
+	util := NewUtil()
+
 	for _, test := range testCases {
-		expUrl := GenerateShortURL(test.longURL)
+		expUrl := util.GenerateShortURL(test.longURL)
 		assert.Equal(t, expUrl, test.wantUrl)
 	}	 
 }

@@ -11,14 +11,15 @@ import (
 type ShortenService struct {
 	host string
 	repo repository.ShortenerRepository
+	util util.Util
 }
 
-func NewShortenerService(host string, repo repository.ShortenerRepository) *ShortenService {
-	return &ShortenService{host: host, repo: repo}
+func NewShortenerService(host string, repo repository.ShortenerRepository, util util.Util) *ShortenService {
+	return &ShortenService{host: host, repo: repo, util: util}
 }
 
 func (ss *ShortenService) Shorten(context context.Context, req model.ShortenURLRequest) string {
-	shortUrl :=  util.GenerateShortURL(req.URL)
+	shortUrl :=  ss.util.GenerateShortURL(req.URL)
 
 	// check if long url already exists in the db
 	if db_short_url, err := ss.repo.IfURLAlreadyExists(context, req.URL); db_short_url != "" && err == nil {

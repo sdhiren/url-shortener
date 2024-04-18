@@ -5,7 +5,21 @@ import (
 	"encoding/base64"
 )
 
-func GenerateShortURL(longURL string) string {
+//go:generate mockgen -source=util.go -destination=mocks/util_mock.go -package=mocks
+
+type Util interface {
+	GenerateShortURL(longURL string) string
+}
+
+type util struct {
+
+}
+
+func NewUtil() Util {
+	return &util{}
+}
+
+func (u *util) GenerateShortURL(longURL string) string {
 	// Compute the SHA-256 hash of the long URL
 	hash := sha256.Sum256([]byte(longURL))
 
