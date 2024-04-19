@@ -8,17 +8,24 @@ import (
 	"urlshortener/src/util"
 )
 
-type ShortenService struct {
+//go:generate mockgen -source=shortener_service.go -destination=mocks/shortener_service_mock.go -package=mocks
+
+type ShortenService interface {
+	Shorten(context context.Context, req model.ShortenURLRequest) string
+	GetOriginalURL(context context.Context, url string) string 
+}
+
+type shortenService struct {
 	host string
 	repo repository.ShortenerRepository
 	util util.Util
 }
 
-func NewShortenerService(host string, repo repository.ShortenerRepository, util util.Util) *ShortenService {
-	return &ShortenService{host: host, repo: repo, util: util}
+func NewShortenerService(host string, repo repository.ShortenerRepository, util util.Util) ShortenService {
+	return &shortenService{host: host, repo: repo, util: util}
 }
 
-func (ss *ShortenService) Shorten(context context.Context, req model.ShortenURLRequest) string {
+func (ss *shortenService) Shorten(context context.Context, req model.ShortenURLRequest) string {
 	shortUrl :=  ss.util.GenerateShortURL(req.URL)
 
 	// check if long url already exists in the db
@@ -38,7 +45,7 @@ func (ss *ShortenService) Shorten(context context.Context, req model.ShortenURLR
 	return ss.host + shortUrl
 }
 
-func (ss *ShortenService) GetOriginalURL(context context.Context, url string) string {
+func (ss *shortenService) GetOriginalURL(context context.Context, url string) string {
 	long_url, err := ss.repo.GetOriginalURL(context, url)
 	if err != nil {
 		fmt.Println("db error: ", err)

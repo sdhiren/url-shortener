@@ -17,7 +17,7 @@ func InitRouter(db *sql.DB) *gin.Engine{
 	util := util.NewUtil()
 
 	shortenerService:= service.NewShortenerService("http://localhost:8080/", repository, util)
-	shortenerController := controller.NewShortenerController(*shortenerService)
+	shortenerController := controller.NewShortenerController(shortenerService)
 
 	r.POST("/shorten", shortenerController.Shorten)
 	r.GET("/url/:url", shortenerController.Redirect)

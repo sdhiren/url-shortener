@@ -34,7 +34,7 @@ func (suite *shortenServiceTestSuite) SetupTest() {
 	suite.mockController = gomock.NewController(suite.T())
 	suite.mockUtil = mocks.NewMockUtil(suite.mockController)
 	suite.mockShortenerRepository = mocks.NewMockShortenerRepository(suite.mockController)
-	suite.shortenerService = *NewShortenerService(host, suite.mockShortenerRepository, suite.mockUtil)
+	suite.shortenerService = NewShortenerService(host, suite.mockShortenerRepository, suite.mockUtil)
 }
 
 func (suite *shortenServiceTestSuite) TearDownTest() {

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 	model "urlshortener/model/request"
 	"urlshortener/src/service"
@@ -19,7 +20,11 @@ func NewShortenerController(service service.ShortenService) *ShortenerController
 func (sc *ShortenerController) Shorten(c *gin.Context){
 
 	var shortenURLRequest model.ShortenURLRequest
-	c.ShouldBind(&shortenURLRequest)
+	if err := c.ShouldBind(&shortenURLRequest); err != nil {
+		fmt.Println("Error :", err)
+	}
+
+
 	shortenUrl := sc.service.Shorten(c, shortenURLRequest)
 
 	c.JSON(http.StatusOK, shortenUrl)
