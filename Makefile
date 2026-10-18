@@ -10,3 +10,20 @@ stopv:
 
 migrate:
     liquibase --defaultsFile=liquibase.properties update
+
+test:
+	go test -race -cover ./...
+
+generate:
+	go generate ./...
+
+# Fails if generated mocks are out of date with their interfaces
+check-generate: generate
+	git diff --exit-code -- mocks
+
+vuln:
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+deps-update:
+	go get -u ./...
+	go mod tidy

@@ -5,7 +5,7 @@ import (
 	"encoding/base64"
 )
 
-//go:generate mockgen -source=util.go -destination=mocks/util_mock.go -package=mocks
+//go:generate go tool mockgen -source=util.go -destination=../../mocks/util_mock.go -package=mocks
 
 type Util interface {
 	GenerateShortURL(longURL string) string

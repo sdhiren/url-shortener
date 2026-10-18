@@ -54,7 +54,7 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
 - [ ] **Q-04 · Idiomatic project layout (M)**: `src/` isn't idiomatic Go. Move to `cmd/server/main.go` + `internal/{handler,service,repository,config,model}`. Split request/response DTOs from the domain model.
 - [ ] **Q-05 · Structured logging (S)**: replace `fmt.Println` with `log/slog` (JSON in prod), add a request-ID middleware, and log errors once at the boundary.
 - [ ] **Q-06 · Naming & formatting (S)**: run `gofmt`/`goimports`, fix the `SaveShotenedURL` typo, use camelCase instead of `snake_case` vars, and rename the `context` param that shadows the package.
-- [ ] **Q-07 · Dependency hygiene (S)**: commit or revert the pending `go.mod`/`go.sum` changes. Either commit `vendor/` or stop using it (it's gitignored but present). Upgrade Go, Gin, and `x/net`, then run `govulncheck`. Migrate from the archived `github.com/golang/mock` to `go.uber.org/mock`.
+- [x] **Q-07 · Dependency hygiene (S)**: done. Go 1.27.2, Gin 1.12, x/net 0.61, govulncheck clean, stale `vendor/` removed, mocks moved to `go.uber.org/mock` (mockgen pinned as a `go tool`), and `make test/generate/check-generate/vuln` added.
 - [ ] **Q-08 · Linting (S)**: add `golangci-lint` with a `.golangci.yml` (errcheck, govet, staticcheck, revive, gosec).
 
 ---

@@ -8,7 +8,7 @@ import (
 	"urlshortener/src/util"
 )
 
-//go:generate mockgen -source=shortener_service.go -destination=mocks/shortener_service_mock.go -package=mocks
+//go:generate go tool mockgen -source=shortener_service.go -destination=../../mocks/shortener_service_mock.go -package=mocks
 
 type ShortenService interface {
 	Shorten(context context.Context, req model.ShortenURLRequest) string

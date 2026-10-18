@@ -2,13 +2,14 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"urlshortener/mocks"
 	model "urlshortener/model/request"
 
-	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/mock/gomock"
 )
 
 const (
@@ -109,4 +110,34 @@ func (suite *shortenServiceTestSuite) Test_Shorten_ShourlReturnShortenedURL_When
 	actualError := suite.shortenerService.Shorten(suite.context, req)
 
 	suite.Equal(expectedErr.Error(), actualError)
+}
+func (suite *shortenServiceTestSuite) Test_GetOriginalURL_ShouldReturnLongURL_WhenShortURLExists(){
+	shortUrl := "A7L4mBG1"
+	longUrl := "www.longurl.com"
+
+	suite.mockShortenerRepository.EXPECT().GetOriginalURL(suite.context, shortUrl).Return(longUrl, nil).Times(1)
+
+	actualResult := suite.shortenerService.GetOriginalURL(suite.context, shortUrl)
+
+	suite.Equal(longUrl, actualResult)
+}
+
+func (suite *shortenServiceTestSuite) Test_GetOriginalURL_ShouldReturnEmptyString_WhenShortURLDoesNotExist(){
+	shortUrl := "unknown1"
+
+	suite.mockShortenerRepository.EXPECT().GetOriginalURL(suite.context, shortUrl).Return("", sql.ErrNoRows).Times(1)
+
+	actualResult := suite.shortenerService.GetOriginalURL(suite.context, shortUrl)
+
+	suite.Equal("", actualResult)
+}
+
+func (suite *shortenServiceTestSuite) Test_GetOriginalURL_ShouldReturnEmptyString_WhenRepositoryReturnsError(){
+	shortUrl := "A7L4mBG1"
+
+	suite.mockShortenerRepository.EXPECT().GetOriginalURL(suite.context, shortUrl).Return("", errors.New("db error")).Times(1)
+
+	actualResult := suite.shortenerService.GetOriginalURL(suite.context, shortUrl)
+
+	suite.Equal("", actualResult)
 }

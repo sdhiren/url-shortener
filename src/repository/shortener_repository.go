@@ -12,7 +12,7 @@ type URL struct {
 	counter_value int `db:"COUNTER_VALUE"`
 }
 
-//go:generate mockgen -source=shortener_repository.go -destination=mocks/shortener_repository_mock.go -package=mocks
+//go:generate go tool mockgen -source=shortener_repository.go -destination=../../mocks/shortener_repository_mock.go -package=mocks
 
 type ShortenerRepository interface {
 	SaveShotenedURL(context context.Context, url, shortenedURL string) error
