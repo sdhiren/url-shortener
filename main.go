@@ -7,6 +7,7 @@ import (
 	"urlshortener/router"
 	"urlshortener/src/config"
 
+	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
 )
 
@@ -16,12 +17,13 @@ func main() {
 
 	fmt.Println("starting service")
 
-	dbConfig, err := config.LoadDBConfig()
+	cfg, err := config.Load()
 	if err != nil {
-		log.Fatal("Invalid database configuration: ", err)
+		log.Fatal("Invalid configuration:\n", err)
 	}
+	gin.SetMode(cfg.Server.Mode)
 
-	db, err := sql.Open("postgres", dbConfig.DSN())
+	db, err := sql.Open("postgres", cfg.DB.DSN())
 	if err != nil {
 		log.Fatal("Error connecting to the database:", err)
 	}
@@ -33,6 +35,9 @@ func main() {
 		log.Fatal("Error pinging the database:", err)
 	}
 
-	r := router.InitRouter(db)
-	r.Run(":8080")
+	r := router.InitRouter(db, cfg.Server.BaseURL)
+	log.Printf("listening on %s, short links use %s", cfg.Server.Addr(), cfg.Server.BaseURL)
+	if err := r.Run(cfg.Server.Addr()); err != nil {
+		log.Fatal("Server stopped: ", err)
+	}
 }

@@ -50,7 +50,7 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
 
 - [ ] **Q-01 · Use contexts properly (S)**: use `QueryRowContext` / `ExecContext` and pass `c.Request.Context()` rather than `*gin.Context`. Drop the per-call `Prepare` (unneeded with `$1` params).
 - [ ] **Q-02 · Remove dead code (S)**: the unused `Cache` map in the repository, the commented-out repository tests, `// var db` in `main.go`, and the unused `URL` struct tags.
-- [ ] **Q-03 · Configuration management (S)**: base URL `http://localhost:8080/` and port `:8080` are hardcoded. Load a typed `Config` struct from env (`BASE_URL`, `PORT`, `DB_*`, `GIN_MODE`) with validation and defaults.
+- [x] **Q-03 · Configuration management (S)**: done. `config.Load()` returns a typed `Config` (`PORT`, `BASE_URL`, `APP_MODE`, `DB_*`) with defaults and validation, and reports every invalid setting at once. `APP_MODE` is used instead of `GIN_MODE` because gin panics on a bad `GIN_MODE` before validation runs.
 - [ ] **Q-04 · Idiomatic project layout (M)**: `src/` isn't idiomatic Go. Move to `cmd/server/main.go` + `internal/{handler,service,repository,config,model}`. Split request/response DTOs from the domain model.
 - [ ] **Q-05 · Structured logging (S)**: replace `fmt.Println` with `log/slog` (JSON in prod), add a request-ID middleware, and log errors once at the boundary.
 - [ ] **Q-06 · Naming & formatting (S)**: run `gofmt`/`goimports`, fix the `SaveShotenedURL` typo, use camelCase instead of `snake_case` vars, and rename the `context` param that shadows the package.
