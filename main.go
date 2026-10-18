@@ -4,29 +4,24 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"os"
 	"urlshortener/router"
+	"urlshortener/src/config"
 
 	_ "github.com/lib/pq"
 )
 
-
-func main(){
+func main() {
 
 	// var db *sql.DB
 
 	fmt.Println("starting service")
 
-	dbUser := os.Getenv("DB_USER")
-	dbPassword := os.Getenv("DB_PASSWORD")
-	dbHost := os.Getenv("DB_HOST")
-	dbPort := os.Getenv("DB_PORT")
-	dbName := os.Getenv("DB_NAME")
+	dbConfig, err := config.LoadDBConfig()
+	if err != nil {
+		log.Fatal("Invalid database configuration: ", err)
+	}
 
-	// Construct the database connection string
-	connStr := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", dbUser, dbPassword, dbHost, dbPort, dbName)
-
-	db, err := sql.Open("postgres", connStr)
+	db, err := sql.Open("postgres", dbConfig.DSN())
 	if err != nil {
 		log.Fatal("Error connecting to the database:", err)
 	}

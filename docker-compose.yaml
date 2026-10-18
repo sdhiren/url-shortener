@@ -7,11 +7,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
-      POSTGRES_USER: primus
-      POSTGRES_PASSWORD: c3xs1bs$123
-      POSTGRES_DB: main
+      POSTGRES_USER: ${DB_USER:?DB_USER is not set, see .env.example}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is not set, see .env.example}
+      POSTGRES_DB: ${DB_NAME:?DB_NAME is not set, see .env.example}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U primus -d main -h localhost"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB} -h localhost"]
       interval: 10s
       retries: 5
       timeout: 5s
@@ -27,7 +27,7 @@ services:
     networks:
       - mynetwork
     env_file:
-      - .envrc
+      - .env
     depends_on:
       db:
         condition: service_healthy
@@ -40,6 +40,10 @@ services:
         condition: service_healthy
     volumes:
       - ./infrastructure/changelog/:/liquibase/changelog/
+    environment:
+      LIQUIBASE_COMMAND_URL: jdbc:postgresql://${DB_HOST:-db}:${DB_PORT:-5432}/${DB_NAME}
+      LIQUIBASE_COMMAND_USERNAME: ${DB_USER}
+      LIQUIBASE_COMMAND_PASSWORD: ${DB_PASSWORD}
     # Command to run the liquibase update service
     command: --defaults-file=/liquibase/changelog/liquibase.properties update
     networks:

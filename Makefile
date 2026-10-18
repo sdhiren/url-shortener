@@ -1,7 +1,5 @@
-login:
-	docker login container-registry.oracle.com -u singh.dhirendra07@gmail.com -p hOCZDyOrtUCa_2K7=
-
-start: login
+start:
+	@test -f .env || (echo "Missing .env: run 'cp .env.example .env' and set the values" && exit 1)
 	docker-compose up -d --build
 
 stop:
