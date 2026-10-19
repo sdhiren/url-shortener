@@ -42,11 +42,12 @@ func (m *MockShortenService) EXPECT() *MockShortenServiceMockRecorder {
 }
 
 // GetOriginalURL mocks base method.
-func (m *MockShortenService) GetOriginalURL(arg0 context.Context, url string) string {
+func (m *MockShortenService) GetOriginalURL(arg0 context.Context, url string) (string, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetOriginalURL", arg0, url)
 	ret0, _ := ret[0].(string)
-	return ret0
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // GetOriginalURL indicates an expected call of GetOriginalURL.
@@ -56,11 +57,12 @@ func (mr *MockShortenServiceMockRecorder) GetOriginalURL(arg0, url any) *gomock.
 }
 
 // Shorten mocks base method.
-func (m *MockShortenService) Shorten(arg0 context.Context, req model.ShortenURLRequest) string {
+func (m *MockShortenService) Shorten(arg0 context.Context, req model.ShortenURLRequest) (string, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Shorten", arg0, req)
 	ret0, _ := ret[0].(string)
-	return ret0
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // Shorten indicates an expected call of Shorten.

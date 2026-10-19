@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	model "urlshortener/model/request"
+	"urlshortener/src/domain"
 	"urlshortener/src/repository"
 	"urlshortener/src/util"
 )
@@ -11,8 +13,8 @@ import (
 //go:generate go tool mockgen -source=shortener_service.go -destination=../../mocks/shortener_service_mock.go -package=mocks
 
 type ShortenService interface {
-	Shorten(context context.Context, req model.ShortenURLRequest) string
-	GetOriginalURL(context context.Context, url string) string 
+	Shorten(context context.Context, req model.ShortenURLRequest) (string, error)
+	GetOriginalURL(context context.Context, url string) (string, error)
 }
 
 type shortenService struct {
@@ -25,31 +27,33 @@ func NewShortenerService(host string, repo repository.ShortenerRepository, util 
 	return &shortenService{host: host, repo: repo, util: util}
 }
 
-func (ss *shortenService) Shorten(context context.Context, req model.ShortenURLRequest) string {
-	shortUrl :=  ss.util.GenerateShortURL(req.URL)
+func (ss *shortenService) Shorten(context context.Context, req model.ShortenURLRequest) (string, error) {
+	shortUrl := ss.util.GenerateShortURL(req.URL)
 
 	// check if long url already exists in the db
-	if db_short_url, err := ss.repo.IfURLAlreadyExists(context, req.URL); db_short_url != "" && err == nil {
-		return ss.host + db_short_url
-	}else if err != nil {
-		fmt.Println("db error: ", err)
-		return err.Error()
+	dbShortUrl, err := ss.repo.IfURLAlreadyExists(context, req.URL)
+	if err != nil {
+		return "", fmt.Errorf("checking if url exists: %w", err)
+	}
+	if dbShortUrl != "" {
+		return ss.host + dbShortUrl, nil
 	}
 
 	// save url in the database
-	save_err := ss.repo.SaveShotenedURL(context, req.URL, shortUrl)
-	if save_err != nil {
-		fmt.Println("error while saving in db: ", save_err)
-		return save_err.Error()
+	if err := ss.repo.SaveShotenedURL(context, req.URL, shortUrl); err != nil {
+		return "", fmt.Errorf("saving short url: %w", err)
 	}
-	return ss.host + shortUrl
+	return ss.host + shortUrl, nil
 }
 
-func (ss *shortenService) GetOriginalURL(context context.Context, url string) string {
-	long_url, err := ss.repo.GetOriginalURL(context, url)
-	if err != nil {
-		fmt.Println("db error: ", err)
-		return ""
+// GetOriginalURL returns domain.ErrURLNotFound when the short code is unknown.
+func (ss *shortenService) GetOriginalURL(context context.Context, url string) (string, error) {
+	longUrl, err := ss.repo.GetOriginalURL(context, url)
+	if errors.Is(err, domain.ErrURLNotFound) {
+		return "", err
 	}
-	return long_url
+	if err != nil {
+		return "", fmt.Errorf("getting original url: %w", err)
+	}
+	return longUrl, nil
 }

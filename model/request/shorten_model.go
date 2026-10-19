@@ -1,5 +1,5 @@
 package model
 
 type ShortenURLRequest struct {
-	URL string `json:"url"`
+	URL string `json:"url" binding:"required"`
 }

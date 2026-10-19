@@ -3,7 +3,9 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"urlshortener/src/domain"
 )
 
 type URL struct {
@@ -59,14 +61,11 @@ type shortenerRepository struct {
 
 
 	err := result.Scan(&url.long_url)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", domain.ErrURLNotFound
+	}
 	if err != nil {
-		if err == sql.ErrNoRows {
-			fmt.Println("no record present")
-			return "", err
-		}else {
-			fmt.Println("error reading the response")
-			return "", err
-		}
+		return "", fmt.Errorf("reading long url for %q: %w", shortenedURL, err)
 	}
 
 	return url.long_url, nil

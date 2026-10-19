@@ -2,28 +2,29 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"testing"
 	"urlshortener/mocks"
 	model "urlshortener/model/request"
+	"urlshortener/src/domain"
 
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 )
 
 const (
-	host = "http://localhost:8080/"
+	host     = "http://localhost:8080/"
+	shortUrl = "A7L4mBG1"
+	longUrl  = "www.longurl.com"
 )
-
 
 type shortenServiceTestSuite struct {
 	suite.Suite
-	context context.Context
-	mockController *gomock.Controller
+	context                 context.Context
+	mockController          *gomock.Controller
 	mockShortenerRepository *mocks.MockShortenerRepository
-	mockUtil *mocks.MockUtil
-	shortenerService ShortenService
+	mockUtil                *mocks.MockUtil
+	shortenerService        ShortenService
 }
 
 func TestShortenServiceTestSuite(t *testing.T) {
@@ -42,102 +43,111 @@ func (suite *shortenServiceTestSuite) TearDownTest() {
 	suite.mockController.Finish()
 }
 
-func (suite *shortenServiceTestSuite) Test_Shorten_ShourlReturnShortenedURL_WhenUrlDoesNotAlreadyExists(){
-	shortUrl := "A7L4mBG1"
-	longUrl:= "www.longurl.com"
-
-	req := model.ShortenURLRequest{
-		URL: longUrl,
-	}
+func (suite *shortenServiceTestSuite) Test_Shorten_ShouldSaveAndReturnShortURL_WhenUrlDoesNotAlreadyExist() {
+	req := model.ShortenURLRequest{URL: longUrl}
 
 	suite.mockUtil.EXPECT().GenerateShortURL(longUrl).Return(shortUrl).Times(1)
 	suite.mockShortenerRepository.EXPECT().IfURLAlreadyExists(suite.context, longUrl).Return("", nil).Times(1)
-	suite.mockShortenerRepository.EXPECT().SaveShotenedURL(suite.context,longUrl, shortUrl).Return(nil).Times(1)
+	suite.mockShortenerRepository.EXPECT().SaveShotenedURL(suite.context, longUrl, shortUrl).Return(nil).Times(1)
 
-	expectedResult := suite.shortenerService.Shorten(suite.context, req)
+	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
 
-	suite.Equal(expectedResult, host + shortUrl)
+	suite.NoError(err)
+	suite.Equal(host+shortUrl, actualResult)
 }
 
-func (suite *shortenServiceTestSuite) Test_Shorten_ShourlReturnShortenedURL_WhenUrlAlreadyExists(){
-	shortUrl := "A7L4mBG1"
-	longUrl:= "www.longurl.com"
-
-	req := model.ShortenURLRequest{
-		URL: longUrl,
-	}
+func (suite *shortenServiceTestSuite) Test_Shorten_ShouldReturnExistingShortURLWithoutSaving_WhenUrlAlreadyExists() {
+	existingShortUrl := "Xy12Ab34"
+	req := model.ShortenURLRequest{URL: longUrl}
 
 	suite.mockUtil.EXPECT().GenerateShortURL(longUrl).Return(shortUrl).Times(1)
-	suite.mockShortenerRepository.EXPECT().IfURLAlreadyExists(suite.context, longUrl).Return(shortUrl, nil).Times(1)
+	suite.mockShortenerRepository.EXPECT().IfURLAlreadyExists(suite.context, longUrl).Return(existingShortUrl, nil).Times(1)
+	suite.mockShortenerRepository.EXPECT().SaveShotenedURL(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 
-	expectedResult := suite.shortenerService.Shorten(suite.context, req)
+	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
 
-	suite.Equal(expectedResult, host + shortUrl)
+	suite.NoError(err)
+	suite.Equal(host+existingShortUrl, actualResult)
 }
 
-func (suite *shortenServiceTestSuite) Test_Shorten_ShourlReturnShortenedURL_WhenIfURLAlreadyExistsCallreturnsError(){
-	shortUrl := "A7L4mBG1"
-	longUrl:= "www.longurl.com"
-
-	req := model.ShortenURLRequest{
-		URL: longUrl,
-	}
-
-	expectedErr := errors.New("db error")
+func (suite *shortenServiceTestSuite) Test_Shorten_ShouldReturnWrappedError_WhenIfURLAlreadyExistsReturnsError() {
+	dbErr := errors.New("db error")
+	req := model.ShortenURLRequest{URL: longUrl}
 
 	suite.mockUtil.EXPECT().GenerateShortURL(longUrl).Return(shortUrl).Times(1)
-	suite.mockShortenerRepository.EXPECT().IfURLAlreadyExists(suite.context, longUrl).Return("", errors.New("db error")).Times(1)
+	suite.mockShortenerRepository.EXPECT().IfURLAlreadyExists(suite.context, longUrl).Return("", dbErr).Times(1)
+	suite.mockShortenerRepository.EXPECT().SaveShotenedURL(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 
-	actualError := suite.shortenerService.Shorten(suite.context, req)
+	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
 
-	suite.Equal(expectedErr.Error(), actualError)
+	suite.ErrorIs(err, dbErr)
+	suite.EqualError(err, "checking if url exists: db error")
+	suite.Empty(actualResult)
 }
 
-func (suite *shortenServiceTestSuite) Test_Shorten_ShourlReturnShortenedURL_WhenSaveShotenedURLCallReturnError(){
-	shortUrl := "A7L4mBG1"
-	longUrl:= "www.longurl.com"
-
-	req := model.ShortenURLRequest{
-		URL: longUrl,
-	}
-
-	expectedErr := errors.New("db error")
+func (suite *shortenServiceTestSuite) Test_Shorten_ShouldReturnWrappedError_WhenSaveShotenedURLReturnsError() {
+	dbErr := errors.New("db error")
+	req := model.ShortenURLRequest{URL: longUrl}
 
 	suite.mockUtil.EXPECT().GenerateShortURL(longUrl).Return(shortUrl).Times(1)
 	suite.mockShortenerRepository.EXPECT().IfURLAlreadyExists(suite.context, longUrl).Return("", nil).Times(1)
-	suite.mockShortenerRepository.EXPECT().SaveShotenedURL(suite.context,longUrl, shortUrl).Return(errors.New("db error")).Times(1)
+	suite.mockShortenerRepository.EXPECT().SaveShotenedURL(suite.context, longUrl, shortUrl).Return(dbErr).Times(1)
 
-	actualError := suite.shortenerService.Shorten(suite.context, req)
+	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
 
-	suite.Equal(expectedErr.Error(), actualError)
+	suite.ErrorIs(err, dbErr)
+	suite.EqualError(err, "saving short url: db error")
+	suite.Empty(actualResult)
 }
-func (suite *shortenServiceTestSuite) Test_GetOriginalURL_ShouldReturnLongURL_WhenShortURLExists(){
-	shortUrl := "A7L4mBG1"
-	longUrl := "www.longurl.com"
 
+func (suite *shortenServiceTestSuite) Test_Shorten_ShouldNotReturnErrorTextAsShortURL_WhenRepositoryFails() {
+	req := model.ShortenURLRequest{URL: longUrl}
+
+	suite.mockUtil.EXPECT().GenerateShortURL(longUrl).Return(shortUrl).Times(1)
+	suite.mockShortenerRepository.EXPECT().IfURLAlreadyExists(suite.context, longUrl).Return("", errors.New("pq: connection refused")).Times(1)
+
+	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
+
+	suite.Error(err)
+	suite.Empty(actualResult)
+}
+
+func (suite *shortenServiceTestSuite) Test_GetOriginalURL_ShouldReturnLongURL_WhenShortURLExists() {
 	suite.mockShortenerRepository.EXPECT().GetOriginalURL(suite.context, shortUrl).Return(longUrl, nil).Times(1)
 
-	actualResult := suite.shortenerService.GetOriginalURL(suite.context, shortUrl)
+	actualResult, err := suite.shortenerService.GetOriginalURL(suite.context, shortUrl)
 
+	suite.NoError(err)
 	suite.Equal(longUrl, actualResult)
 }
 
-func (suite *shortenServiceTestSuite) Test_GetOriginalURL_ShouldReturnEmptyString_WhenShortURLDoesNotExist(){
-	shortUrl := "unknown1"
+func (suite *shortenServiceTestSuite) Test_GetOriginalURL_ShouldReturnErrURLNotFound_WhenShortURLDoesNotExist() {
+	suite.mockShortenerRepository.EXPECT().GetOriginalURL(suite.context, "unknown1").Return("", domain.ErrURLNotFound).Times(1)
 
-	suite.mockShortenerRepository.EXPECT().GetOriginalURL(suite.context, shortUrl).Return("", sql.ErrNoRows).Times(1)
+	actualResult, err := suite.shortenerService.GetOriginalURL(suite.context, "unknown1")
 
-	actualResult := suite.shortenerService.GetOriginalURL(suite.context, shortUrl)
-
-	suite.Equal("", actualResult)
+	suite.ErrorIs(err, domain.ErrURLNotFound)
+	suite.EqualError(err, "short url not found")
+	suite.Empty(actualResult)
 }
 
-func (suite *shortenServiceTestSuite) Test_GetOriginalURL_ShouldReturnEmptyString_WhenRepositoryReturnsError(){
-	shortUrl := "A7L4mBG1"
+func (suite *shortenServiceTestSuite) Test_GetOriginalURL_ShouldKeepErrURLNotFound_WhenRepositoryWrapsIt() {
+	wrapped := errors.Join(errors.New("lookup"), domain.ErrURLNotFound)
+	suite.mockShortenerRepository.EXPECT().GetOriginalURL(suite.context, shortUrl).Return("", wrapped).Times(1)
 
-	suite.mockShortenerRepository.EXPECT().GetOriginalURL(suite.context, shortUrl).Return("", errors.New("db error")).Times(1)
+	_, err := suite.shortenerService.GetOriginalURL(suite.context, shortUrl)
 
-	actualResult := suite.shortenerService.GetOriginalURL(suite.context, shortUrl)
+	suite.ErrorIs(err, domain.ErrURLNotFound)
+}
 
-	suite.Equal("", actualResult)
+func (suite *shortenServiceTestSuite) Test_GetOriginalURL_ShouldReturnWrappedError_WhenRepositoryReturnsError() {
+	dbErr := errors.New("db error")
+	suite.mockShortenerRepository.EXPECT().GetOriginalURL(suite.context, shortUrl).Return("", dbErr).Times(1)
+
+	actualResult, err := suite.shortenerService.GetOriginalURL(suite.context, shortUrl)
+
+	suite.ErrorIs(err, dbErr)
+	suite.NotErrorIs(err, domain.ErrURLNotFound)
+	suite.EqualError(err, "getting original url: db error")
+	suite.Empty(actualResult)
 }

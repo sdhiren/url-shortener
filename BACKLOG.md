@@ -22,11 +22,7 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
   `GET /url/:url` returns `200` with the long URL as JSON. It should return `302` (or `301`) with a `Location` header, and `404` when the code is unknown (right now it returns `200 ""`).
   Consider moving it to `GET /:code` so short links are actually short.
 
-- [ ] **B-03 · Proper error handling & HTTP status codes (M)**
-  - `Shorten` ignores bind errors and carries on with an empty URL.
-  - Service methods return `string`, so DB errors come back to the client as `200` with the raw error text, which leaks internal details.
-  - Change the service signatures to `(..., error)`, define domain errors (`ErrNotFound`, `ErrInvalidURL`, …), and map them to `400/404/500` in the controller.
-  - Return structured JSON: `{"short_url": "...", "code": "..."}` / `{"error": "..."}`.
+- [x] **B-03 · Proper error handling & HTTP status codes (M)**: done. Service returns `(string, error)` with wrapped errors, and the repository maps `sql.ErrNoRows` to `domain.ErrURLNotFound`. The controller returns 400 (missing `url` / invalid JSON), 404 (unknown code) and 500 (generic message; details only in the server log). JSON responses: `{"short_url"}`, `{"long_url"}`, `{"error"}`.
 
 - [ ] **B-04 · Input validation (S)**
   Reject empty values, non-`http(s)` schemes (`javascript:`, `data:`…), malformed URLs, URLs over 1000 chars (the DB column limit), and links that point back to our own domain. Use `binding:"required,url"` plus `net/url` parsing.
@@ -61,7 +57,7 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
 
 ## P1 — Testing
 
-- [ ] **T-01 · Repository integration tests (M)**: the repository has 0% coverage because all tests are commented out. Use `testcontainers-go` (real Postgres) or `sqlmock`.
+- [ ] **T-01 · Repository integration tests (M)**: `GetOriginalURL` is covered with `go-sqlmock`; `SaveShotenedURL`, `IfURLAlreadyExists` and `updateCounter` still have no tests. Use `testcontainers-go` (real Postgres) or `sqlmock`.
 - [ ] **T-02 · Expand service/controller tests (S)**: cover error paths, validation, and status codes after B-02/B-03. Service is at 73.7%.
 - [ ] **T-03 · End-to-end API test (M)**: spin up the router plus a real DB, then shorten, redirect, and assert the counter.
 - [ ] **T-04 · Race detector & coverage in CI (S)**: run `go test -race -cover ./...`.
