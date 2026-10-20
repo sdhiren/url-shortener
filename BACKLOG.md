@@ -26,15 +26,6 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
 
 - [x] **B-04 · Input validation (S)**: done. The service validates before hashing or saving and returns `domain.InvalidURLError` (400 with a reason). Rules: trimmed, required, ≤ 1000 characters, no whitespace or control characters, `http`/`https` only, a host is required, no credentials, valid port, valid (IDN) domain with a TLD, no private, loopback or reserved IPs, and no links back to the shortener's own `BASE_URL`.
 
-- [ ] **B-02 · Redirect endpoint doesn't redirect (S)**
-  `GET /url/:url` returns `200` with the long URL as JSON. It should return `302` (or `301`) with a `Location` header, and `404` when the code is unknown (right now it returns `200 ""`).
-  Consider moving it to `GET /:code` so short links are actually short.
-
-- [x] **B-03 · Proper error handling & HTTP status codes (M)**: done. Service returns `(string, error)` with wrapped errors, and the repository maps `sql.ErrNoRows` to `domain.ErrURLNotFound`. The controller returns 400 (missing `url` / invalid JSON), 404 (unknown code) and 500 (generic message; details only in the server log). JSON responses: `{"short_url"}`, `{"long_url"}`, `{"error"}`.
-
-- [ ] **B-04 · Input validation (S)**
-  Reject empty values, non-`http(s)` schemes (`javascript:`, `data:`…), malformed URLs, URLs over 1000 chars (the DB column limit), and links that point back to our own domain. Use `binding:"required,url"` plus `net/url` parsing.
-
 - [ ] **B-05 · Hash collisions & duplicate rows (M)**
   - An 8-char SHA-256 prefix can collide for two different URLs. Nothing detects that, so a collision would redirect users to the wrong site.
   - There's no `UNIQUE` constraint on `SHORT_URL`/`LONG_URL`, and the check-then-insert pattern races under concurrent requests.
