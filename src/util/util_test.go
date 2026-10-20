@@ -7,9 +7,9 @@ import (
 )
 
 func TestGenerateShortURL(t *testing.T) {
-	
+
 	testCases := []struct {
-		longURL  string
+		longURL string
 		wantUrl string
 	}{
 		{"https://www.example.com/1", "xiGD94yi"},
@@ -23,5 +23,5 @@ func TestGenerateShortURL(t *testing.T) {
 	for _, test := range testCases {
 		expUrl := util.GenerateShortURL(test.longURL)
 		assert.Equal(t, expUrl, test.wantUrl)
-	}	 
+	}
 }

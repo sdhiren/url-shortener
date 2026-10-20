@@ -12,7 +12,6 @@ type Util interface {
 }
 
 type util struct {
-
 }
 
 func NewUtil() Util {

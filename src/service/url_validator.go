@@ -22,7 +22,7 @@ const (
 	reasonMalformed      = "url is malformed"
 	reasonScheme         = "url must start with http:// or https://"
 	reasonHost           = "url must include a host"
-	reasonCredentials    = "url must not contain a username or password"
+	reasonCredentials    = "url must not contain a username or password" //nolint:gosec // G101: an error message, not a credential
 	reasonPort           = "url port must be between 1 and 65535"
 	reasonInvalidHost    = "url host is not a valid domain name or IP address"
 	reasonNoTLD          = "url host must be a public domain like example.com"
@@ -118,11 +118,15 @@ func isValidLabel(label string) bool {
 		return false
 	}
 	for _, r := range label {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-') {
+		if !isLabelChar(r) {
 			return false
 		}
 	}
 	return true
+}
+
+func isLabelChar(r rune) bool {
+	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-'
 }
 
 func looksNumeric(s string) bool {
