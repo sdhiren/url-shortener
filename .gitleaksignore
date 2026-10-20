@@ -1,0 +1,8 @@
+# Known leaks in old commits, removed from the code in backlog item B-01.
+# They stay in git history, so the credentials must be rotated. Only add a
+# fingerprint here after the secret has been removed AND rotated.
+5d8a7e1aeec9f8e06b125f8aa47ae89bca2d0f37:.envrc:hardcoded-password-in-config:2
+be80842b74e5ee879b7e03b904381e4be40988ff:docker-compose.yaml:hardcoded-password-in-config:20
+be80842b74e5ee879b7e03b904381e4be40988ff:infrastructure/changelog/liquibase.properties:hardcoded-password-in-config:5
+578472acdd19ca635c0ec000d593ec72f60cd5f3:Makefile:docker-login-password:2
+578472acdd19ca635c0ec000d593ec72f60cd5f3:docker-compose.yaml:hardcoded-password-in-config:20
