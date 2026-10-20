@@ -63,6 +63,11 @@ func (sc *ShortenerController) Redirect(c *gin.Context) {
 // respondWithError maps domain errors to HTTP status codes. Unexpected errors are
 // logged and hidden behind a generic message so internal details never reach clients.
 func respondWithError(c *gin.Context, err error) {
+	var invalidURLErr *domain.InvalidURLError
+	if errors.As(err, &invalidURLErr) {
+		c.JSON(http.StatusBadRequest, response.ErrorResponse{Error: invalidURLErr.Error()})
+		return
+	}
 	if errors.Is(err, domain.ErrURLNotFound) {
 		c.JSON(http.StatusNotFound, response.ErrorResponse{Error: errURLNotFound})
 		return

@@ -181,3 +181,24 @@ func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldReturnInternalSer
 	suite.assertResponse(http.StatusInternalServerError, `{"error": "internal server error"}`)
 	suite.NotContains(suite.recorder.Body.String(), "relation")
 }
+
+func (suite *shortenerControllerTestSuite) Test_Shorten_ShouldReturnBadRequestWithReason_WhenURLIsInvalid() {
+	suite.setShortenRequest(`{"url": "ftp://example.com"}`)
+	invalidErr := &domain.InvalidURLError{Reason: "url must start with http:// or https://"}
+	suite.mockShortenService.EXPECT().Shorten(suite.context, gomock.Any()).Return("", invalidErr).Times(1)
+
+	suite.shortenerController.Shorten(suite.context)
+
+	suite.assertResponse(http.StatusBadRequest, `{"error": "invalid url: url must start with http:// or https://"}`)
+}
+
+func (suite *shortenerControllerTestSuite) Test_Shorten_ShouldReturnBadRequestWithoutWrapperText_WhenInvalidURLErrorIsWrapped() {
+	suite.setShortenRequest(`{"url": "https://sho.rt/abc"}`)
+	wrapped := fmt.Errorf("internal context: %w", &domain.InvalidURLError{Reason: "url must not point to this url shortener"})
+	suite.mockShortenService.EXPECT().Shorten(suite.context, gomock.Any()).Return("", wrapped).Times(1)
+
+	suite.shortenerController.Shorten(suite.context)
+
+	suite.assertResponse(http.StatusBadRequest, `{"error": "invalid url: url must not point to this url shortener"}`)
+	suite.NotContains(suite.recorder.Body.String(), "internal context")
+}

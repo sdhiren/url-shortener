@@ -15,7 +15,7 @@ import (
 const (
 	host     = "http://localhost:8080/"
 	shortUrl = "A7L4mBG1"
-	longUrl  = "www.longurl.com"
+	longUrl  = "https://www.longurl.com"
 )
 
 type shortenServiceTestSuite struct {
@@ -150,4 +150,56 @@ func (suite *shortenServiceTestSuite) Test_GetOriginalURL_ShouldReturnWrappedErr
 	suite.NotErrorIs(err, domain.ErrURLNotFound)
 	suite.EqualError(err, "getting original url: db error")
 	suite.Empty(actualResult)
+}
+
+func (suite *shortenServiceTestSuite) Test_Shorten_ShouldReturnInvalidURLErrorWithoutTouchingRepository_WhenURLIsInvalid() {
+	invalidUrls := map[string]string{
+		"missing scheme":    "www.longurl.com",
+		"ftp scheme":        "ftp://files.example.com",
+		"javascript scheme": "javascript:alert(1)",
+		"whitespace only":   "   ",
+		"self link":         host + "Z9cJpkVn",
+	}
+
+	for name, invalidUrl := range invalidUrls {
+		suite.Run(name, func() {
+			suite.SetupTest()
+			suite.mockUtil.EXPECT().GenerateShortURL(gomock.Any()).Times(0)
+			suite.mockShortenerRepository.EXPECT().IfURLAlreadyExists(gomock.Any(), gomock.Any()).Times(0)
+			suite.mockShortenerRepository.EXPECT().SaveShotenedURL(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+
+			actualResult, err := suite.shortenerService.Shorten(suite.context, model.ShortenURLRequest{URL: invalidUrl})
+
+			var invalidURLErr *domain.InvalidURLError
+			suite.ErrorAs(err, &invalidURLErr)
+			suite.Empty(actualResult)
+		})
+	}
+}
+
+func (suite *shortenServiceTestSuite) Test_Shorten_ShouldUseTrimmedURL_WhenURLHasSurroundingWhitespace() {
+	req := model.ShortenURLRequest{URL: "  \t" + longUrl + "\n "}
+
+	suite.mockUtil.EXPECT().GenerateShortURL(longUrl).Return(shortUrl).Times(1)
+	suite.mockShortenerRepository.EXPECT().IfURLAlreadyExists(suite.context, longUrl).Return("", nil).Times(1)
+	suite.mockShortenerRepository.EXPECT().SaveShotenedURL(suite.context, longUrl, shortUrl).Return(nil).Times(1)
+
+	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
+
+	suite.NoError(err)
+	suite.Equal(host+shortUrl, actualResult)
+}
+
+func (suite *shortenServiceTestSuite) Test_Shorten_ShouldSkipSelfLinkCheck_WhenHostIsNotAValidURL() {
+	service := NewShortenerService("http://[::1", suite.mockShortenerRepository, suite.mockUtil)
+	req := model.ShortenURLRequest{URL: longUrl}
+
+	suite.mockUtil.EXPECT().GenerateShortURL(longUrl).Return(shortUrl).Times(1)
+	suite.mockShortenerRepository.EXPECT().IfURLAlreadyExists(suite.context, longUrl).Return("", nil).Times(1)
+	suite.mockShortenerRepository.EXPECT().SaveShotenedURL(suite.context, longUrl, shortUrl).Return(nil).Times(1)
+
+	actualResult, err := service.Shorten(suite.context, req)
+
+	suite.NoError(err)
+	suite.Equal("http://[::1"+shortUrl, actualResult)
 }
