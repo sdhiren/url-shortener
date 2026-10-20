@@ -36,8 +36,7 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
   - It counts *shorten requests*. Click counts on redirect are usually what people want, so decide which (or track both).
   - The goroutine has no context or error handling and may still be running at shutdown.
 
-- [ ] **B-07 · Fix the `migrate` Makefile target (S)**
-  The recipe is indented with spaces, not a tab, so `make migrate` fails. It also points at the wrong properties path.
+- [x] **B-07 · Fix the `migrate` Makefile target (S)**: done in P-06. The recipe was indented with spaces, which GNU make 4 on CI rejects for the whole Makefile (macOS make 3.81 didn't). `make migrate` now runs `docker compose run --rm liquibase`.
 
 ---
 

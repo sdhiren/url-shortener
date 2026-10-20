@@ -12,8 +12,9 @@ stop:
 stopv:
 	docker-compose down --volumes
 
+# Runs the Liquibase migrations against the compose database
 migrate:
-    liquibase --defaultsFile=liquibase.properties update
+	docker compose run --rm liquibase
 
 test:
 	go test -race -cover ./...

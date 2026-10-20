@@ -203,6 +203,7 @@ set -a; source .env; set +a; DB_HOST=localhost go run .
 | Command | What it does |
 |---|---|
 | `make start` / `make stop` / `make stopv` | Start / stop the Docker Compose stack (`stopv` also deletes the DB volume) |
+| `make migrate` | Run the Liquibase migrations against the Compose database |
 | `make test` | Run all tests with the race detector and coverage |
 | `make coverage` | Run tests, write `coverage.out`, and fail if total coverage is below `COVERAGE_MIN` (80%) |
 | `make lint` | Run [golangci-lint](https://golangci-lint.run/) with `.golangci.yml` |
@@ -218,7 +219,7 @@ Interfaces in `src/service`, `src/repository` and `src/util` have `//go:generate
 
 ### Database migrations
 
-Migrations live in `infrastructure/changelog/`. To add one, put a new SQL file in `sql/` and add a `changeSet` for it to `changelog.xml`. Docker Compose runs Liquibase on `make start`.
+Migrations live in `infrastructure/changelog/`. To add one, put a new SQL file in `sql/` and add a `changeSet` for it to `changelog.xml`. Docker Compose runs Liquibase on `make start`; run `make migrate` to apply new migrations to a running stack.
 
 ## CI
 
