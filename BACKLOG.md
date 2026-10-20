@@ -59,7 +59,7 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
 - [ ] **T-01 · Repository integration tests (M)**: `GetOriginalURL` is covered with `go-sqlmock`; `SaveShotenedURL`, `IfURLAlreadyExists` and `updateCounter` still have no tests. Use `testcontainers-go` (real Postgres) or `sqlmock`.
 - [ ] **T-02 · Expand service/controller tests (S)**: service and controller are at 100% after B-03/B-04; still to do: redirect tests once B-02 lands.
 - [ ] **T-03 · End-to-end API test (M)**: spin up the router plus a real DB, then shorten, redirect, and assert the counter.
-- [ ] **T-04 · Race detector & coverage in CI (S)**: run `go test -race -cover ./...`.
+- [ ] **T-04 · Race detector & coverage in CI (S)**: run `go test -race -cover ./...` (part of P-06).
 
 ---
 
@@ -70,7 +70,15 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
 - [ ] **P-03 · Production Dockerfile (S)**: multi-stage build, a static binary with `CGO_ENABLED=0`, a `distroless`/`scratch` runtime, a non-root user, a `.dockerignore`, and pinned base image versions.
 - [ ] **P-04 · Compose fixes (S)**: the API should wait for Liquibase (`condition: service_completed_successfully`). Pin `postgres` and `liquibase` versions, drop the obsolete `version:` key, and don't publish the DB port by default.
 - [ ] **P-05 · Migrations (S)**: add indexes on `SHORT_URL`/`LONG_URL`, `CREATED_AT`, and `EXPIRES_AT` columns, and fix the `author="your_name"` changeset. Optionally replace Liquibase (a JVM container) with `golang-migrate` or `goose` run at startup.
-- [ ] **P-06 · CI pipeline (S)**: GitHub Actions to lint, test with `-race`, run `govulncheck`, and build the Docker image on each PR.
+- [ ] **P-06 · CI pipeline with GitHub Actions (M)**: `.github/workflows/ci.yml`, run on every push to `main` and every pull request.
+  - **Setup:** `actions/setup-go` using the version from `go.mod`, with module and build caching. Cancel in-progress runs on the same branch. Read-only `permissions` by default.
+  - **Checks:** `gofmt` (fail on unformatted files), `go vet`, and `golangci-lint` (needs Q-08 config). Fail if `go mod tidy` or `make check-generate` would change files.
+  - **Tests:** `go test -race -coverprofile` with a coverage summary in the job output, the report uploaded as an artifact, and a minimum coverage threshold.
+  - **Security:** `govulncheck`, and a secret scan (e.g. `gitleaks`) so B-01 can't happen again.
+  - **Integration:** a Postgres service container that runs the Liquibase migrations, then the repository/E2E tests (once T-01/T-03 exist).
+  - **Build:** `docker build` on every run; on `main`, push the image to GitHub Container Registry (GHCR) tagged with the commit SHA.
+  - **Maintenance:** Dependabot for Go modules, GitHub Actions and the Docker base image. A CI status badge in the README.
+  - **Protection:** once green, enable branch protection on `main` requiring these checks, and move from direct pushes to PRs.
 - [ ] **P-07 · Rate limiting (M)**: per-IP limits on `POST /shorten` (in-memory token bucket first, Redis later).
 - [ ] **P-08 · Observability (M)**: Prometheus `/metrics` (request latency, status codes, shortens and redirects), optional OpenTelemetry tracing.
 - [ ] **P-09 · Security headers & CORS (S)**: CORS config for a frontend, `gin.SetTrustedProxies`, and a request body size limit.
@@ -100,6 +108,6 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
 3. **B-03 → B-04 → B-02** (error model, validation, real redirects)
 4. **B-05 + P-05**, then **B-06** (data integrity)
 5. **Q-01, Q-02, Q-05, Q-06** (cleanup pass), then **Q-04** (layout refactor)
-6. **T-01 → T-04**, **Q-08**, **P-06** (safety net)
+6. **Q-08 → P-06** (CI safety net; could be pulled earlier, since we push straight to `main`), then **T-01 → T-04**
 7. **P-01 → P-04, P-10** (ship-ready)
 8. Features: **F-04 → F-01 → F-02 → F-03 → F-06 → F-05 …**
