@@ -54,6 +54,19 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
 
 ---
 
+## P1 — Documentation
+
+- [ ] **D-01 · README (S)**: the repo has no `README.md`. Add one that lets a new developer run, use and contribute to the project:
+  - **Overview:** what the service does, its features, and the current status and limitations (link to `BACKLOG.md`).
+  - **Architecture:** request flow router → controller → service → repository → Postgres, the project layout, and Liquibase migrations (a small diagram).
+  - **Prerequisites:** Go (version from `go.mod`), Docker / Docker Compose, `make`.
+  - **Quick start:** `cp .env.example .env`, `make start`, a first `curl`, and `make stop` / `make stopv`.
+  - **Configuration:** a table of every env var (`PORT`, `BASE_URL`, `APP_MODE`, `DB_*`) with default, required flag and allowed values, and why `APP_MODE` is used instead of `GIN_MODE`.
+  - **API reference:** each endpoint with `curl` examples, request/response JSON, all status codes (200/400/404/500), and the URL validation rules.
+  - **Development:** running locally without Docker, `make test` / `generate` / `check-generate` / `vuln` / `deps-update`, and how mocks are generated.
+  - **Contributing:** branch per backlog item, PR to protected `main`, squash merge, `Dhiren: …` commit/PR title style, and keeping secrets out of git.
+  - Keep it current: update the README in the same PR as any change to setup, config or the API. Add a CI badge once P-06 lands.
+
 ## P1 — Testing
 
 - [ ] **T-01 · Repository integration tests (M)**: `GetOriginalURL` is covered with `go-sqlmock`; `SaveShotenedURL`, `IfURLAlreadyExists` and `updateCounter` still have no tests. Use `testcontainers-go` (real Postgres) or `sqlmock`.
@@ -82,7 +95,7 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
 - [ ] **P-07 · Rate limiting (M)**: per-IP limits on `POST /shorten` (in-memory token bucket first, Redis later).
 - [ ] **P-08 · Observability (M)**: Prometheus `/metrics` (request latency, status codes, shortens and redirects), optional OpenTelemetry tracing.
 - [ ] **P-09 · Security headers & CORS (S)**: CORS config for a frontend, `gin.SetTrustedProxies`, and a request body size limit.
-- [ ] **P-10 · README & API docs (S)**: setup, env vars, architecture, and an OpenAPI/Swagger spec (`swaggo`).
+- [ ] **P-10 · API docs (S)**: an OpenAPI/Swagger spec (`swaggo`) served at `/swagger`, linked from the README (D-01).
 
 ---
 
@@ -108,6 +121,6 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
 3. **B-03 → B-04 → B-02** (error model, validation, real redirects)
 4. **B-05 + P-05**, then **B-06** (data integrity)
 5. **Q-01, Q-02, Q-05, Q-06** (cleanup pass), then **Q-04** (layout refactor)
-6. **Q-08 → P-06** (CI safety net; could be pulled earlier, since we push straight to `main`), then **T-01 → T-04**
+6. **D-01** (README; small, and helps every PR after it), **Q-08 → P-06** (CI safety net for PRs), then **T-01 → T-04**
 7. **P-01 → P-04, P-10** (ship-ready)
 8. Features: **F-04 → F-01 → F-02 → F-03 → F-06 → F-05 …**
