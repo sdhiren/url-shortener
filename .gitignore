@@ -3,3 +3,6 @@
 # Local secrets: never commit. Copy .env.example to .env instead.
 .env
 .envrc
+
+# Test coverage output
+coverage*.out

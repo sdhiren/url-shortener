@@ -1,0 +1,29 @@
+title = "url-shortener gitleaks config"
+
+# keep all built-in rules (API keys, tokens, private keys, ...)
+[extend]
+useDefault = true
+
+# The built-in rules miss plain passwords that don't follow a known token format.
+# These two cover the leaks fixed in backlog item B-01.
+
+[[rules]]
+id = "docker-login-password"
+description = "Password passed on the docker login command line"
+regex = '''docker\s+login\b[^\n]*?\s(?:-p|--password)[\s=]+([^\s]+)'''
+secretGroup = 1
+keywords = ["docker"]
+
+[[rules]]
+id = "hardcoded-password-in-config"
+description = "Hardcoded password in an env, compose, properties or other config file"
+# values starting with "$", "?", "{" or "}" are interpolations like ${DB_PASSWORD} or
+# ${DB_PASSWORD:?message}, not secrets
+regex = '''(?i)\b[a-z_.]*password["']?\s*[:=]\s*["']?([^\s"'$?{}][^\s"']{5,})'''
+secretGroup = 1
+path = '''(?i)(^|/)(\.env[^/]*|\.envrc|[^/]+\.(env|ya?ml|properties|toml|ini|json|conf|cfg)|Makefile)$'''
+keywords = ["password"]
+
+[[rules.allowlists]]
+description = "Placeholder values in example files"
+regexes = ['''(?i)^(change-?me|example|placeholder|<[^>]*>)$''']

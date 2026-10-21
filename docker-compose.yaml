@@ -31,6 +31,9 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      # don't start serving until the schema exists
+      liquibase:
+        condition: service_completed_successfully
   
   liquibase:
     image: liquibase/liquibase:4.9.1
@@ -40,12 +43,15 @@ services:
         condition: service_healthy
     volumes:
       - ./infrastructure/changelog/:/liquibase/changelog/
-    environment:
-      LIQUIBASE_COMMAND_URL: jdbc:postgresql://${DB_HOST:-db}:${DB_PORT:-5432}/${DB_NAME}
-      LIQUIBASE_COMMAND_USERNAME: ${DB_USER}
-      LIQUIBASE_COMMAND_PASSWORD: ${DB_PASSWORD}
-    # Command to run the liquibase update service
-    command: --defaults-file=/liquibase/changelog/liquibase.properties update
+    # Credentials are passed as arguments: Liquibase Community 4.9 ignores the
+    # LIQUIBASE_COMMAND_* environment variables. Liquibase always runs inside the
+    # compose network, so it connects to db:5432 whatever DB_HOST is set to.
+    command:
+      - --defaults-file=/liquibase/changelog/liquibase.properties
+      - --url=jdbc:postgresql://db:5432/${DB_NAME}
+      - --username=${DB_USER}
+      - --password=${DB_PASSWORD}
+      - update
     networks:
       - mynetwork
 
