@@ -41,19 +41,34 @@ func (m *MockShortenService) EXPECT() *MockShortenServiceMockRecorder {
 	return m.recorder
 }
 
-// GetOriginalURL mocks base method.
-func (m *MockShortenService) GetOriginalURL(arg0 context.Context, url string) (string, error) {
+// LookupShortURL mocks base method.
+func (m *MockShortenService) LookupShortURL(ctx context.Context, code string) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetOriginalURL", arg0, url)
+	ret := m.ctrl.Call(m, "LookupShortURL", ctx, code)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// GetOriginalURL indicates an expected call of GetOriginalURL.
-func (mr *MockShortenServiceMockRecorder) GetOriginalURL(arg0, url any) *gomock.Call {
+// LookupShortURL indicates an expected call of LookupShortURL.
+func (mr *MockShortenServiceMockRecorder) LookupShortURL(ctx, code any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetOriginalURL", reflect.TypeOf((*MockShortenService)(nil).GetOriginalURL), arg0, url)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LookupShortURL", reflect.TypeOf((*MockShortenService)(nil).LookupShortURL), ctx, code)
+}
+
+// ResolveShortURL mocks base method.
+func (m *MockShortenService) ResolveShortURL(ctx context.Context, code string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ResolveShortURL", ctx, code)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ResolveShortURL indicates an expected call of ResolveShortURL.
+func (mr *MockShortenServiceMockRecorder) ResolveShortURL(ctx, code any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveShortURL", reflect.TypeOf((*MockShortenService)(nil).ResolveShortURL), ctx, code)
 }
 
 // Shorten mocks base method.

@@ -48,8 +48,8 @@ func (suite *shortenerControllerTestSuite) setShortenRequest(body string) {
 }
 
 func (suite *shortenerControllerTestSuite) setRedirectRequest(code string) {
-	suite.context.Request = httptest.NewRequest(http.MethodGet, "/url/"+code, nil)
-	suite.context.Params = []gin.Param{{Key: "url", Value: code}}
+	suite.context.Request = httptest.NewRequest(http.MethodGet, "/"+code, nil)
+	suite.context.Params = []gin.Param{{Key: "code", Value: code}}
 }
 
 func (suite *shortenerControllerTestSuite) assertResponse(wantStatus int, wantBody string) {
@@ -143,28 +143,76 @@ func (suite *shortenerControllerTestSuite) Test_Shorten_ShouldReturnNotFound_Whe
 	suite.assertResponse(http.StatusNotFound, `{"error": "short url not found"}`)
 }
 
-func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldReturnOKWithLongURL() {
+func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldRedirectWith302ToLongURL() {
 	suite.setRedirectRequest("7RtNmD6Z")
-	suite.mockShortenService.EXPECT().GetOriginalURL(suite.context, "7RtNmD6Z").Return("https://www.example.com/3", nil).Times(1)
+	suite.mockShortenService.EXPECT().ResolveShortURL(suite.context, "7RtNmD6Z").Return("https://www.example.com/3", nil).Times(1)
 
 	suite.shortenerController.Redirect(suite.context)
+	suite.context.Writer.WriteHeaderNow()
 
-	suite.assertResponse(http.StatusOK, `{"long_url": "https://www.example.com/3"}`)
+	suite.Equal(http.StatusFound, suite.recorder.Code)
+	suite.Equal("https://www.example.com/3", suite.recorder.Header().Get("Location"))
+	suite.Equal("no-store", suite.recorder.Header().Get("Cache-Control"))
 }
 
-func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldReturnNotFound_WhenShortURLDoesNotExist() {
+func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldKeepLongURLExactlyAsStored() {
+	longURLs := []string{
+		"https://example.com/a/b?q=1&r=two#section",
+		"https://example.com/a%20b?q=hello%20world",
+		"http://example.com:8080/",
+	}
+
+	for _, longURL := range longURLs {
+		suite.Run(longURL, func() {
+			suite.SetupTest()
+			suite.setRedirectRequest("7RtNmD6Z")
+			suite.mockShortenService.EXPECT().ResolveShortURL(suite.context, "7RtNmD6Z").Return(longURL, nil).Times(1)
+
+			suite.shortenerController.Redirect(suite.context)
+			suite.context.Writer.WriteHeaderNow()
+
+			suite.Equal(http.StatusFound, suite.recorder.Code)
+			suite.Equal(longURL, suite.recorder.Header().Get("Location"))
+		})
+	}
+}
+
+func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldPercentEncodeNonASCIIInLocation() {
+	// HTTP headers must be ASCII; browsers decode this back to https://münchen.de/straße
+	suite.setRedirectRequest("7RtNmD6Z")
+	suite.mockShortenService.EXPECT().ResolveShortURL(suite.context, "7RtNmD6Z").Return("https://münchen.de/straße", nil).Times(1)
+
+	suite.shortenerController.Redirect(suite.context)
+	suite.context.Writer.WriteHeaderNow()
+
+	suite.Equal(http.StatusFound, suite.recorder.Code)
+	suite.Equal("https://m%c3%bcnchen.de/stra%c3%9fe", suite.recorder.Header().Get("Location"))
+}
+
+func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldPassCodeFromPathToService() {
+	suite.setRedirectRequest("qv3-bns9")
+	suite.mockShortenService.EXPECT().ResolveShortURL(suite.context, "qv3-bns9").Return("https://example.com", nil).Times(1)
+
+	suite.shortenerController.Redirect(suite.context)
+	suite.context.Writer.WriteHeaderNow()
+
+	suite.Equal(http.StatusFound, suite.recorder.Code)
+}
+
+func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldReturnNotFoundWithoutRedirect_WhenCodeDoesNotExist() {
 	suite.setRedirectRequest("unknown1")
-	suite.mockShortenService.EXPECT().GetOriginalURL(suite.context, "unknown1").Return("", domain.ErrURLNotFound).Times(1)
+	suite.mockShortenService.EXPECT().ResolveShortURL(suite.context, "unknown1").Return("", domain.ErrURLNotFound).Times(1)
 
 	suite.shortenerController.Redirect(suite.context)
 
 	suite.assertResponse(http.StatusNotFound, `{"error": "short url not found"}`)
+	suite.Empty(suite.recorder.Header().Get("Location"))
 }
 
 func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldReturnNotFound_WhenErrURLNotFoundIsWrapped() {
 	suite.setRedirectRequest("unknown1")
 	wrapped := fmt.Errorf("lookup: %w", domain.ErrURLNotFound)
-	suite.mockShortenService.EXPECT().GetOriginalURL(suite.context, "unknown1").Return("", wrapped).Times(1)
+	suite.mockShortenService.EXPECT().ResolveShortURL(suite.context, "unknown1").Return("", wrapped).Times(1)
 
 	suite.shortenerController.Redirect(suite.context)
 
@@ -173,13 +221,14 @@ func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldReturnNotFound_Wh
 
 func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldReturnInternalServerErrorWithoutLeakingDetails_WhenServiceFails() {
 	suite.setRedirectRequest("7RtNmD6Z")
-	suite.mockShortenService.EXPECT().GetOriginalURL(suite.context, "7RtNmD6Z").
-		Return("", errors.New("getting original url: pq: relation \"urls\" does not exist")).Times(1)
+	suite.mockShortenService.EXPECT().ResolveShortURL(suite.context, "7RtNmD6Z").
+		Return("", errors.New("resolving short url: pq: relation \"urls\" does not exist")).Times(1)
 
 	suite.shortenerController.Redirect(suite.context)
 
 	suite.assertResponse(http.StatusInternalServerError, `{"error": "internal server error"}`)
 	suite.NotContains(suite.recorder.Body.String(), "relation")
+	suite.Empty(suite.recorder.Header().Get("Location"))
 }
 
 func (suite *shortenerControllerTestSuite) Test_Shorten_ShouldReturnBadRequestWithReason_WhenURLIsInvalid() {
@@ -201,4 +250,40 @@ func (suite *shortenerControllerTestSuite) Test_Shorten_ShouldReturnBadRequestWi
 
 	suite.assertResponse(http.StatusBadRequest, `{"error": "invalid url: url must not point to this url shortener"}`)
 	suite.NotContains(suite.recorder.Body.String(), "internal context")
+}
+
+func (suite *shortenerControllerTestSuite) Test_Redirect_HeadRequestShouldRedirectWithoutRecordingClick() {
+	suite.context.Request = httptest.NewRequest(http.MethodHead, "/7RtNmD6Z", nil)
+	suite.context.Params = []gin.Param{{Key: "code", Value: "7RtNmD6Z"}}
+	suite.mockShortenService.EXPECT().LookupShortURL(suite.context, "7RtNmD6Z").Return("https://www.example.com/3", nil).Times(1)
+	suite.mockShortenService.EXPECT().ResolveShortURL(gomock.Any(), gomock.Any()).Times(0)
+
+	suite.shortenerController.Redirect(suite.context)
+	suite.context.Writer.WriteHeaderNow()
+
+	suite.Equal(http.StatusFound, suite.recorder.Code)
+	suite.Equal("https://www.example.com/3", suite.recorder.Header().Get("Location"))
+	suite.Equal("no-store", suite.recorder.Header().Get("Cache-Control"))
+}
+
+func (suite *shortenerControllerTestSuite) Test_Redirect_HeadRequestShouldReturnNotFound_WhenCodeDoesNotExist() {
+	suite.context.Request = httptest.NewRequest(http.MethodHead, "/unknown1", nil)
+	suite.context.Params = []gin.Param{{Key: "code", Value: "unknown1"}}
+	suite.mockShortenService.EXPECT().LookupShortURL(suite.context, "unknown1").Return("", domain.ErrURLNotFound).Times(1)
+
+	suite.shortenerController.Redirect(suite.context)
+
+	suite.Equal(http.StatusNotFound, suite.recorder.Code)
+	suite.Empty(suite.recorder.Header().Get("Location"))
+}
+
+func (suite *shortenerControllerTestSuite) Test_Redirect_GetRequestShouldRecordClickNotJustLookup() {
+	suite.setRedirectRequest("7RtNmD6Z")
+	suite.mockShortenService.EXPECT().ResolveShortURL(suite.context, "7RtNmD6Z").Return("https://www.example.com/3", nil).Times(1)
+	suite.mockShortenService.EXPECT().LookupShortURL(gomock.Any(), gomock.Any()).Times(0)
+
+	suite.shortenerController.Redirect(suite.context)
+	suite.context.Writer.WriteHeaderNow()
+
+	suite.Equal(http.StatusFound, suite.recorder.Code)
 }
