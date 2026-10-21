@@ -3,7 +3,7 @@
 [![CI](https://github.com/sdhiren/url-shortener/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sdhiren/url-shortener/actions/workflows/ci.yml)
 
 A URL shortening service written in Go, using [Gin](https://gin-gonic.com/) and PostgreSQL.
-You send it a long URL and it gives you a short one; you send the short code and it gives you the original URL back.
+You send it a long URL and it gives you a short link; opening the short link redirects to the original URL and counts the click.
 
 ## Contents
 
@@ -20,6 +20,7 @@ You send it a long URL and it gives you a short one; you send the short code and
 ## Features
 
 - Shorten any public `http`/`https` URL to an 8-character code.
+- Short links redirect with `302 Found` and count every click atomically, so no clicks are lost under concurrent traffic.
 - The same long URL always returns the same short code.
 - Strict URL validation, with a clear reason when a URL is rejected (see [URL validation rules](#url-validation-rules)).
 - JSON errors with proper HTTP status codes; internal errors are logged, never sent to clients.
@@ -80,14 +81,16 @@ curl -s -X POST http://localhost:8080/shorten -H 'Content-Type: application/json
 {"short_url":"http://localhost:8080/Xy12Ab34"}
 ```
 
-Look up the original URL with the code from that response:
+Open the short link (in a browser, or with `curl -i` to see the redirect):
 
 ```bash
-curl -s http://localhost:8080/url/Xy12Ab34
+curl -i http://localhost:8080/Xy12Ab34
 ```
 
-```json
-{"long_url":"https://example.com/some/long/path"}
+```text
+HTTP/1.1 302 Found
+Cache-Control: no-store
+Location: https://example.com/some/long/path
 ```
 
 Stop everything with `make stop`, or `make stopv` to also delete the database volume.
@@ -108,7 +111,7 @@ All configuration comes from environment variables. With Docker Compose they are
 | `DB_NAME` | yes | | |
 | `DB_SSLMODE` | no | `disable` | `disable`, `allow`, `prefer`, `require`, `verify-ca`, `verify-full` |
 
-`BASE_URL` is the public address of the service. Short links are built by appending the code to it, so in production set it to your real domain, e.g. `https://sho.rt/`.
+`BASE_URL` is the public address of the service. Short links are built by appending the code to it, and the redirect route is served under its path, so in production set it to your real domain, e.g. `https://sho.rt/`.
 
 `APP_MODE` sets Gin's mode. It's used instead of Gin's own `GIN_MODE`, because Gin crashes on an invalid `GIN_MODE` before the service can validate it.
 
@@ -144,21 +147,27 @@ Creates a short URL, or returns the existing one if this long URL was shortened 
 | `400` | `{"error": "invalid url: <reason>"}` | URL fails validation (see below) |
 | `500` | `{"error": "internal server error"}` | Unexpected error, e.g. the database is down; details are in the server log |
 
-### `GET /url/:code`
+### `GET /:code`
 
-Returns the original URL for a short code.
+Redirects to the original URL and counts one click. This is the short link itself, so the route lives under the path of `BASE_URL`: with `BASE_URL=https://example.com/s/` it is `GET /s/:code`.
 
 ```bash
-curl -s http://localhost:8080/url/Xy12Ab34
+curl -i http://localhost:8080/Xy12Ab34
 ```
 
-| Status | Body | When |
+| Status | Headers / body | When |
 |---|---|---|
-| `200` | `{"long_url": "https://example.com/some/long/path"}` | Code exists |
-| `404` | `{"error": "short url not found"}` | Unknown code |
+| `302` | `Location: <long url>`, `Cache-Control: no-store` | Code exists; the click is counted |
+| `404` | `{"error": "short url not found"}` | Unknown code, or a code that can't exist (not 1–20 characters of `A–Z a–z 0–9 - _`) |
 | `500` | `{"error": "internal server error"}` | Unexpected error |
 
-> This endpoint returns JSON for now. Backlog item B-02 changes it to a real `302` redirect.
+- It's a `302`, not a `301`: browsers cache `301` redirects and stop asking the server, so later clicks would never be counted. `Cache-Control: no-store` has the same purpose.
+- Non-ASCII characters in the long URL are percent-encoded in `Location`, as HTTP requires; browsers decode them back.
+- Each click is counted with a single atomic `UPDATE … SET CLICK_COUNT = CLICK_COUNT + 1`, so concurrent clicks are never lost.
+
+### `HEAD /:code`
+
+Same status and `Location` as `GET`, but **doesn't count a click**, so link checkers and preview bots don't inflate the numbers.
 
 ### URL validation rules
 
@@ -247,6 +256,5 @@ Dependabot ([config](.github/dependabot.yml)) opens weekly PRs for Go modules, G
 
 This project is being turned into a production-ready service, one item at a time. [`BACKLOG.md`](BACKLOG.md) has the full prioritized list. Known limitations right now:
 
-- `GET /url/:code` returns JSON instead of redirecting (B-02).
 - Two different URLs could get the same 8-character code, and nothing detects it yet (B-05).
-- The usage counter can lose updates under concurrent requests (B-06).
+- Click counts are stored but there's no API to read them yet (F-03 / F-04).
