@@ -6,4 +6,7 @@
     <changeSet id="001" author="your_name">
         <sqlFile path="./liquibase/changelog/sql/001_create_urls_table.sql"/>
     </changeSet>
+    <changeSet id="002" author="dhiren">
+        <sqlFile path="./liquibase/changelog/sql/002_rename_counter_to_click_count.sql"/>
+    </changeSet>
 </databaseChangeLog>
