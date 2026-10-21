@@ -8,107 +8,72 @@ import (
 	"urlshortener/src/domain"
 )
 
-type URL struct {
-	long_url      string `db:"LONG_URL"`
-	short_url     string `db:"SHORT_URL"`
-	counter_value int    `db:"COUNTER_VALUE"`
-}
-
 //go:generate go tool mockgen -source=shortener_repository.go -destination=../../mocks/shortener_repository_mock.go -package=mocks
 
 type ShortenerRepository interface {
-	SaveShotenedURL(context context.Context, url, shortenedURL string) error
-	GetOriginalURL(context context.Context, shortenedURL string) (string, error)
-	IfURLAlreadyExists(context context.Context, long_url string) (string, error)
+	SaveShotenedURL(ctx context.Context, url, shortenedURL string) error
+	// RecordClick atomically increments the click count for shortenedURL and returns
+	// its long URL, or domain.ErrURLNotFound if the short URL doesn't exist.
+	RecordClick(ctx context.Context, shortenedURL string) (string, error)
+	// GetLongURL returns the long URL for shortenedURL without counting a click,
+	// or domain.ErrURLNotFound if the short URL doesn't exist.
+	GetLongURL(ctx context.Context, shortenedURL string) (string, error)
+	IfURLAlreadyExists(ctx context.Context, longURL string) (string, error)
 }
 
 type shortenerRepository struct {
-	Cache map[string]string
-	db    *sql.DB
+	db *sql.DB
 }
 
 func NewShortenerRepository(db *sql.DB) ShortenerRepository {
-	cache := make(map[string]string)
-	return &shortenerRepository{Cache: cache, db: db}
+	return &shortenerRepository{db: db}
 }
 
-func (sr *shortenerRepository) SaveShotenedURL(context context.Context, url, shortenedURL string) error {
-
-	// prepare insert statement
-	stmt, err := sr.db.Prepare("INSERT INTO URLS (LONG_URL, SHORT_URL, COUNTER_VALUE) VALUES ($1, $2, $3)")
+func (sr *shortenerRepository) SaveShotenedURL(ctx context.Context, url, shortenedURL string) error {
+	_, err := sr.db.ExecContext(ctx, "INSERT INTO URLS (LONG_URL, SHORT_URL) VALUES ($1, $2)", url, shortenedURL)
 	if err != nil {
-		fmt.Println("Error preparing insert statement:", err)
-		return err
+		return fmt.Errorf("inserting short url %q: %w", shortenedURL, err)
 	}
-
-	defer stmt.Close()
-
-	// Execute the insert statement
-	_, err = stmt.Exec(url, shortenedURL, 1)
-	if err != nil {
-		fmt.Println("Error executing insert statement:", err)
-		return err
-	}
-
 	return nil
 }
 
-func (sr *shortenerRepository) GetOriginalURL(context context.Context, shortenedURL string) (string, error) {
+func (sr *shortenerRepository) RecordClick(ctx context.Context, shortenedURL string) (string, error) {
+	var longURL string
+	// a single UPDATE ... RETURNING is atomic, so concurrent clicks are never lost
+	err := sr.db.QueryRowContext(ctx,
+		"UPDATE URLS SET CLICK_COUNT = CLICK_COUNT + 1 WHERE SHORT_URL = $1 RETURNING LONG_URL",
+		shortenedURL,
+	).Scan(&longURL)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", domain.ErrURLNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("recording click for %q: %w", shortenedURL, err)
+	}
+	return longURL, nil
+}
 
-	url := URL{}
-	result := sr.db.QueryRow("SELECT LONG_URL FROM URLS WHERE SHORT_URL = $1", shortenedURL)
-
-	err := result.Scan(&url.long_url)
+func (sr *shortenerRepository) GetLongURL(ctx context.Context, shortenedURL string) (string, error) {
+	var longURL string
+	err := sr.db.QueryRowContext(ctx, "SELECT LONG_URL FROM URLS WHERE SHORT_URL = $1", shortenedURL).Scan(&longURL)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", domain.ErrURLNotFound
 	}
 	if err != nil {
 		return "", fmt.Errorf("reading long url for %q: %w", shortenedURL, err)
 	}
-
-	return url.long_url, nil
+	return longURL, nil
 }
 
-func (sr *shortenerRepository) IfURLAlreadyExists(context context.Context, long_url string) (string, error) {
-
-	url := URL{}
-	result := sr.db.QueryRow("SELECT SHORT_URL, COUNTER_VALUE FROM URLS WHERE LONG_URL = $1", long_url)
-
-	err := result.Scan(&url.short_url, &url.counter_value)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			fmt.Println("no record present")
-			return "", nil
-		} else {
-			fmt.Println("error reading the response")
-			return "", err
-		}
+// IfURLAlreadyExists returns the short URL already stored for longURL, or "" if there is none.
+func (sr *shortenerRepository) IfURLAlreadyExists(ctx context.Context, longURL string) (string, error) {
+	var shortURL string
+	err := sr.db.QueryRowContext(ctx, "SELECT SHORT_URL FROM URLS WHERE LONG_URL = $1", longURL).Scan(&shortURL)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
 	}
-
-	// update the counter using a goroutine
-	// updateCounter logs its own errors; reworked in backlog item B-06
-	go func() { _ = sr.updateCounter(url.short_url, url.counter_value) }()
-
-	return url.short_url, nil
-}
-
-func (sr *shortenerRepository) updateCounter(short_url string, counter_value int) error {
-
-	// prepare the update sql statement
-	stmt, err := sr.db.Prepare("UPDATE URLS SET COUNTER_VALUE = $1 WHERE SHORT_URL = $2")
 	if err != nil {
-		fmt.Println("error occurred while updating the counter: ", err)
-		return err
+		return "", fmt.Errorf("looking up existing short url: %w", err)
 	}
-	defer stmt.Close()
-
-	// Execute the SQL statement
-	_, err = stmt.Exec(counter_value+1, short_url)
-	if err != nil {
-		fmt.Println("update Error :", err)
-		return err
-	}
-
-	fmt.Println("counter updated successful")
-	return nil
+	return shortURL, nil
 }
