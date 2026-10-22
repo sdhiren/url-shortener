@@ -18,9 +18,7 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
   - Drop the `login` target (or read creds from env / `docker login` interactively). The image used is `postgres` from Docker Hub, so the Oracle login may not be needed at all.
   - Optional: purge history with `git filter-repo`.
 
-- [ ] **B-02 · Redirect endpoint doesn't redirect (S)**
-  `GET /url/:url` returns `200` with the long URL as JSON. It should return `302` (or `301`) with a `Location` header, and `404` when the code is unknown (right now it returns `200 ""`).
-  Consider moving it to `GET /:code` so short links are actually short.
+- [x] **B-02 · Redirect endpoint doesn't redirect (S)**: done. `GET /:code` (under `BASE_URL`'s path) returns `302` with `Location` and `Cache-Control: no-store`; `HEAD` gets the same redirect without counting a click. Malformed codes return 404 without querying the DB. The old JSON `GET /url/:code` is removed; a JSON lookup returns in F-04.
 
 - [x] **B-03 · Proper error handling & HTTP status codes (M)**: done. Service returns `(string, error)` with wrapped errors, and the repository maps `sql.ErrNoRows` to `domain.ErrURLNotFound`. The controller returns 400 (missing `url` / invalid JSON), 404 (unknown code) and 500 (generic message; details only in the server log). JSON responses: `{"short_url"}`, `{"long_url"}`, `{"error"}`.
 
@@ -31,10 +29,7 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
   - There's no `UNIQUE` constraint on `SHORT_URL`/`LONG_URL`, and the check-then-insert pattern races under concurrent requests.
   - Fix: add a migration with unique indexes, use `INSERT … ON CONFLICT`, and on a collision retry with a salt. Alternative: switch to base62 encoding of a DB sequence/ID, which can't collide (see F-08).
 
-- [ ] **B-06 · Counter logic is racy and counts the wrong thing (S)**
-  - `updateCounter` does read → `+1` → write in a fire-and-forget goroutine, so concurrent updates get lost. Use `SET COUNTER_VALUE = COUNTER_VALUE + 1`.
-  - It counts *shorten requests*. Click counts on redirect are usually what people want, so decide which (or track both).
-  - The goroutine has no context or error handling and may still be running at shutdown.
+- [x] **B-06 · Counter logic is racy and counts the wrong thing (S)**: done. Migration 002 renames `COUNTER_VALUE` to `CLICK_COUNT` (default 0, old shorten-request counts reset). Clicks are counted with one atomic `UPDATE … SET CLICK_COUNT = CLICK_COUNT + 1 … RETURNING LONG_URL`; the background goroutine is gone, and shortening no longer touches the count. Verified: 200 concurrent clicks gave exactly 200.
 
 - [x] **B-07 · Fix the `migrate` Makefile target (S)**: done in P-06. The recipe was indented with spaces, which GNU make 4 on CI rejects for the whole Makefile (macOS make 3.81 didn't). `make migrate` now runs `docker compose run --rm liquibase`.
 
@@ -42,8 +37,8 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
 
 ## P1 — Code quality & structure
 
-- [ ] **Q-01 · Use contexts properly (S)**: use `QueryRowContext` / `ExecContext` and pass `c.Request.Context()` rather than `*gin.Context`. Drop the per-call `Prepare` (unneeded with `$1` params).
-- [ ] **Q-02 · Remove dead code (S)**: the unused `Cache` map in the repository, the commented-out repository tests, `// var db` in `main.go`, and the unused `URL` struct tags.
+- [ ] **Q-01 · Use contexts properly (S)**: use `QueryRowContext` / `ExecContext` and pass `c.Request.Context()` rather than `*gin.Context`. Drop the per-call `Prepare` (unneeded with `$1` params). *(The repository already uses the `*Context` methods since B-06.)*
+- [ ] **Q-02 · Remove dead code (S)**: the unused `Cache` map in the repository, the commented-out repository tests, `// var db` in `main.go`, and the unused `URL` struct tags. *(The `Cache` map and `URL` struct were removed in B-06.)*
 - [x] **Q-03 · Configuration management (S)**: done. `config.Load()` returns a typed `Config` (`PORT`, `BASE_URL`, `APP_MODE`, `DB_*`) with defaults and validation, and reports every invalid setting at once. `APP_MODE` is used instead of `GIN_MODE` because gin panics on a bad `GIN_MODE` before validation runs.
 - [ ] **Q-04 · Idiomatic project layout (M)**: `src/` isn't idiomatic Go. Move to `cmd/server/main.go` + `internal/{handler,service,repository,config,model}`. Split request/response DTOs from the domain model.
 - [ ] **Q-05 · Structured logging (S)**: replace `fmt.Println` with `log/slog` (JSON in prod), add a request-ID middleware, and log errors once at the boundary.
@@ -59,8 +54,8 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
 
 ## P1 — Testing
 
-- [ ] **T-01 · Repository integration tests (M)**: `GetOriginalURL` is covered with `go-sqlmock`; `SaveShotenedURL`, `IfURLAlreadyExists` and `updateCounter` still have no tests. Use `testcontainers-go` (real Postgres) or `sqlmock`.
-- [ ] **T-02 · Expand service/controller tests (S)**: service and controller are at 100% after B-03/B-04; still to do: redirect tests once B-02 lands.
+- [ ] **T-01 · Repository integration tests (M)**: every repository method is covered with exact-SQL `go-sqlmock` tests (100%). Still to do: run them against a real Postgres (`testcontainers-go`) so the SQL itself is checked.
+- [x] **T-02 · Expand service/controller tests (S)**: done. Every package is at 100%, including redirect/HEAD tests and router tests that send real HTTP requests through every layer to sqlmock.
 - [ ] **T-03 · End-to-end API test (M)**: spin up the router plus a real DB, then shorten, redirect, and assert the counter.
 - [x] **T-04 · Race detector & coverage in CI (S)**: done in P-06: `make coverage` runs `go test -race` and fails below 80% total (excluding mocks and `main.go`).
 

@@ -40,46 +40,61 @@ func (m *MockShortenerRepository) EXPECT() *MockShortenerRepositoryMockRecorder 
 	return m.recorder
 }
 
-// GetOriginalURL mocks base method.
-func (m *MockShortenerRepository) GetOriginalURL(arg0 context.Context, shortenedURL string) (string, error) {
+// GetLongURL mocks base method.
+func (m *MockShortenerRepository) GetLongURL(ctx context.Context, shortenedURL string) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetOriginalURL", arg0, shortenedURL)
+	ret := m.ctrl.Call(m, "GetLongURL", ctx, shortenedURL)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// GetOriginalURL indicates an expected call of GetOriginalURL.
-func (mr *MockShortenerRepositoryMockRecorder) GetOriginalURL(arg0, shortenedURL any) *gomock.Call {
+// GetLongURL indicates an expected call of GetLongURL.
+func (mr *MockShortenerRepositoryMockRecorder) GetLongURL(ctx, shortenedURL any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetOriginalURL", reflect.TypeOf((*MockShortenerRepository)(nil).GetOriginalURL), arg0, shortenedURL)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLongURL", reflect.TypeOf((*MockShortenerRepository)(nil).GetLongURL), ctx, shortenedURL)
 }
 
 // IfURLAlreadyExists mocks base method.
-func (m *MockShortenerRepository) IfURLAlreadyExists(arg0 context.Context, long_url string) (string, error) {
+func (m *MockShortenerRepository) IfURLAlreadyExists(ctx context.Context, longURL string) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "IfURLAlreadyExists", arg0, long_url)
+	ret := m.ctrl.Call(m, "IfURLAlreadyExists", ctx, longURL)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // IfURLAlreadyExists indicates an expected call of IfURLAlreadyExists.
-func (mr *MockShortenerRepositoryMockRecorder) IfURLAlreadyExists(arg0, long_url any) *gomock.Call {
+func (mr *MockShortenerRepositoryMockRecorder) IfURLAlreadyExists(ctx, longURL any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IfURLAlreadyExists", reflect.TypeOf((*MockShortenerRepository)(nil).IfURLAlreadyExists), arg0, long_url)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IfURLAlreadyExists", reflect.TypeOf((*MockShortenerRepository)(nil).IfURLAlreadyExists), ctx, longURL)
+}
+
+// RecordClick mocks base method.
+func (m *MockShortenerRepository) RecordClick(ctx context.Context, shortenedURL string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RecordClick", ctx, shortenedURL)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RecordClick indicates an expected call of RecordClick.
+func (mr *MockShortenerRepositoryMockRecorder) RecordClick(ctx, shortenedURL any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecordClick", reflect.TypeOf((*MockShortenerRepository)(nil).RecordClick), ctx, shortenedURL)
 }
 
 // SaveShotenedURL mocks base method.
-func (m *MockShortenerRepository) SaveShotenedURL(arg0 context.Context, url, shortenedURL string) error {
+func (m *MockShortenerRepository) SaveShotenedURL(ctx context.Context, url, shortenedURL string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SaveShotenedURL", arg0, url, shortenedURL)
+	ret := m.ctrl.Call(m, "SaveShotenedURL", ctx, url, shortenedURL)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // SaveShotenedURL indicates an expected call of SaveShotenedURL.
-func (mr *MockShortenerRepositoryMockRecorder) SaveShotenedURL(arg0, url, shortenedURL any) *gomock.Call {
+func (mr *MockShortenerRepositoryMockRecorder) SaveShotenedURL(ctx, url, shortenedURL any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveShotenedURL", reflect.TypeOf((*MockShortenerRepository)(nil).SaveShotenedURL), arg0, url, shortenedURL)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveShotenedURL", reflect.TypeOf((*MockShortenerRepository)(nil).SaveShotenedURL), ctx, url, shortenedURL)
 }

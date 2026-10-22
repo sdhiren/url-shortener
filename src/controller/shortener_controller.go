@@ -49,15 +49,23 @@ func (sc *ShortenerController) Shorten(c *gin.Context) {
 	c.JSON(http.StatusOK, response.ShortenURLResponse{ShortURL: shortUrl})
 }
 
+// Redirect sends the client to the long URL for the short code in the path.
+// It uses 302 rather than 301 because browsers cache 301s and skip the server
+// on later visits, so those clicks would never be counted. HEAD requests (link
+// checkers, previews) get the same redirect but aren't counted as clicks.
 func (sc *ShortenerController) Redirect(c *gin.Context) {
-	url := c.Param("url")
-	originalUrl, err := sc.service.GetOriginalURL(c, url)
+	resolve := sc.service.ResolveShortURL
+	if c.Request.Method == http.MethodHead {
+		resolve = sc.service.LookupShortURL
+	}
+	longURL, err := resolve(c, c.Param("code"))
 	if err != nil {
 		respondWithError(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, response.OriginalURLResponse{LongURL: originalUrl})
+	c.Header("Cache-Control", "no-store")
+	c.Redirect(http.StatusFound, longURL)
 }
 
 // respondWithError maps domain errors to HTTP status codes. Unexpected errors are

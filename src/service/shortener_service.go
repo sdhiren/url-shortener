@@ -15,8 +15,16 @@ import (
 
 type ShortenService interface {
 	Shorten(context context.Context, req model.ShortenURLRequest) (string, error)
-	GetOriginalURL(context context.Context, url string) (string, error)
+	// ResolveShortURL records a click on code and returns its long URL, or
+	// domain.ErrURLNotFound if the code is malformed or unknown.
+	ResolveShortURL(ctx context.Context, code string) (string, error)
+	// LookupShortURL returns the long URL for code without counting a click, or
+	// domain.ErrURLNotFound if the code is malformed or unknown.
+	LookupShortURL(ctx context.Context, code string) (string, error)
 }
+
+// maxCodeLength matches the SHORT_URL varchar(20) column.
+const maxCodeLength = 20
 
 type shortenService struct {
 	host    string
@@ -59,14 +67,39 @@ func (ss *shortenService) Shorten(context context.Context, req model.ShortenURLR
 	return ss.host + shortUrl, nil
 }
 
-// GetOriginalURL returns domain.ErrURLNotFound when the short code is unknown.
-func (ss *shortenService) GetOriginalURL(context context.Context, url string) (string, error) {
-	longUrl, err := ss.repo.GetOriginalURL(context, url)
+func (ss *shortenService) ResolveShortURL(ctx context.Context, code string) (string, error) {
+	return resolve(ctx, code, ss.repo.RecordClick)
+}
+
+func (ss *shortenService) LookupShortURL(ctx context.Context, code string) (string, error) {
+	return resolve(ctx, code, ss.repo.GetLongURL)
+}
+
+func resolve(ctx context.Context, code string, find func(context.Context, string) (string, error)) (string, error) {
+	// malformed codes can't exist in the database, so skip the query
+	if !isValidCode(code) {
+		return "", domain.ErrURLNotFound
+	}
+	longURL, err := find(ctx, code)
 	if errors.Is(err, domain.ErrURLNotFound) {
 		return "", err
 	}
 	if err != nil {
-		return "", fmt.Errorf("getting original url: %w", err)
+		return "", fmt.Errorf("resolving short url: %w", err)
 	}
-	return longUrl, nil
+	return longURL, nil
+}
+
+// isValidCode reports whether code could be a generated short code: 1 to
+// maxCodeLength characters of the base64url alphabet.
+func isValidCode(code string) bool {
+	if code == "" || len(code) > maxCodeLength {
+		return false
+	}
+	for _, r := range code {
+		if !isLabelChar(r) && r != '_' {
+			return false
+		}
+	}
+	return true
 }
