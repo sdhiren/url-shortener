@@ -24,10 +24,7 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
 
 - [x] **B-04 · Input validation (S)**: done. The service validates before hashing or saving and returns `domain.InvalidURLError` (400 with a reason). Rules: trimmed, required, ≤ 1000 characters, no whitespace or control characters, `http`/`https` only, a host is required, no credentials, valid port, valid (IDN) domain with a TLD, no private, loopback or reserved IPs, and no links back to the shortener's own `BASE_URL`.
 
-- [ ] **B-05 · Hash collisions & duplicate rows (M)**
-  - An 8-char SHA-256 prefix can collide for two different URLs. Nothing detects that, so a collision would redirect users to the wrong site.
-  - There's no `UNIQUE` constraint on `SHORT_URL`/`LONG_URL`, and the check-then-insert pattern races under concurrent requests.
-  - Fix: add a migration with unique indexes, use `INSERT … ON CONFLICT`, and on a collision retry with a salt. Alternative: switch to base62 encoding of a DB sequence/ID, which can't collide (see F-08).
+- [x] **B-05 · Hash collisions & duplicate rows (M)**: done. A unique constraint on `SHORT_URL` plus `INSERT … ON CONFLICT (SHORT_URL) DO NOTHING`. When a code is taken, the service reads its owner: for the same URL it returns the existing link; for a different URL (a collision) it retries with a deterministic salted hash, up to 5 attempts. The racy check-then-insert (`IfURLAlreadyExists`) is gone. Verified on Postgres: 50 concurrent shortens gave 1 row, and a planted row holding a victim URL's code didn't hijack it.
 
 - [x] **B-06 · Counter logic is racy and counts the wrong thing (S)**: done. Migration 002 renames `COUNTER_VALUE` to `CLICK_COUNT` (default 0, old shorten-request counts reset). Clicks are counted with one atomic `UPDATE … SET CLICK_COUNT = CLICK_COUNT + 1 … RETURNING LONG_URL`; the background goroutine is gone, and shortening no longer touches the count. Verified: 200 concurrent clicks gave exactly 200.
 
@@ -67,7 +64,7 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
 - [ ] **P-02 · Health endpoints (S)**: `/healthz` (liveness) and `/readyz` (pings the DB). Wire them into the compose healthcheck.
 - [ ] **P-03 · Production Dockerfile (S)**: multi-stage build, a static binary with `CGO_ENABLED=0`, a `distroless`/`scratch` runtime, a non-root user, a `.dockerignore`, and pinned base image versions.
 - [ ] **P-04 · Compose fixes (S)**: the API should wait for Liquibase (`condition: service_completed_successfully`). Pin `postgres` and `liquibase` versions, drop the obsolete `version:` key, and don't publish the DB port by default. *(Partly done in P-06: the API now waits for Liquibase to finish, and Liquibase gets its credentials as arguments, since Liquibase Community 4.9 ignores `LIQUIBASE_COMMAND_*` env vars, so B-01 had silently broken migrations.)*
-- [ ] **P-05 · Migrations (S)**: add indexes on `SHORT_URL`/`LONG_URL`, `CREATED_AT`, and `EXPIRES_AT` columns, and fix the `author="your_name"` changeset. Optionally replace Liquibase (a JVM container) with `golang-migrate` or `goose` run at startup.
+- [x] **P-05 · Migrations (S)**: done in migration 003: duplicates merged, unique constraint on `SHORT_URL`, and a `CREATED_AT` column. Decided against the rest: no `LONG_URL` index (nothing queries by long URL any more, and a btree index fails on long multi-byte URLs); `EXPIRES_AT` belongs to F-02; and changeset 001's `author` can't be changed, because Liquibase would treat it as a new changeset. Replacing Liquibase is still optional.
 - [x] **P-06 · CI pipeline with GitHub Actions (M)**: done. `.github/workflows/ci.yml` runs on PRs and on pushes to `main`, with Go from `go.mod`, caching, concurrency cancelling and read-only permissions:
   - **Lint:** `make tidy-check`, `make check-generate`, `go vet`, golangci-lint v2.14.0.
   - **Test:** `make coverage` (race detector, 80% gate), coverage table in the run summary, report uploaded as an artifact.
@@ -101,8 +98,8 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
 
 1. **B-01** (secrets: rotate today)
 2. **Q-07**, then **Q-03** (clean deps + config; this makes everything else easier)
-3. **B-03 → B-04 → B-02** (error model, validation, real redirects)
-4. **B-05 + P-05**, then **B-06** (data integrity)
+3. ~~**B-03 → B-04 → B-02**~~ (done: error model, validation, real redirects)
+4. ~~**B-05 + P-05**, **B-06**~~ (done: data integrity)
 5. **Q-01, Q-02, Q-05, Q-06** (cleanup pass), then **Q-04** (layout refactor)
 6. ~~**D-01**, **Q-08 → P-06**~~ (done), then **T-01 → T-03**
 7. **P-01 → P-04, P-10** (ship-ready)

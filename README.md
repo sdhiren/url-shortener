@@ -21,7 +21,8 @@ You send it a long URL and it gives you a short link; opening the short link red
 
 - Shorten any public `http`/`https` URL to an 8-character code.
 - Short links redirect with `302 Found` and count every click atomically, so no clicks are lost under concurrent traffic.
-- The same long URL always returns the same short code.
+- The same long URL always returns the same short code, even under concurrent requests (one row per URL).
+- Hash collisions are detected and resolved, so a short link can never be taken over by a different URL (see [How short codes work](#how-short-codes-work)).
 - Strict URL validation, with a clear reason when a URL is rejected (see [URL validation rules](#url-validation-rules)).
 - JSON errors with proper HTTP status codes; internal errors are logged, never sent to clients.
 - Typed, validated configuration from environment variables: the service lists every invalid setting at startup.
@@ -50,12 +51,22 @@ Each layer depends only on the interface of the layer below, so the tests use ge
 | `src/controller/` | HTTP handlers: parse requests, map errors to status codes |
 | `src/service/` | Business logic: URL validation, de-duplication, building short URLs |
 | `src/repository/` | Postgres queries |
-| `src/util/` | Short code generation (first 8 characters of a base64url SHA-256 hash) |
+| `src/util/` | Short code generation (first 8 characters of a base64url SHA-256 hash; see [How short codes work](#how-short-codes-work)) |
 | `src/config/` | Loads and validates configuration from the environment |
 | `src/domain/` | Domain errors shared across layers |
 | `model/request/`, `model/response/` | JSON request and response bodies |
 | `mocks/` | Generated mocks (`make generate`); don't edit by hand |
 | `infrastructure/changelog/` | Liquibase changelog and SQL migrations |
+
+### How short codes work
+
+1. The code is the first 8 characters of the base64url-encoded SHA-256 hash of the long URL, so the same URL always maps to the same code.
+2. The service runs `INSERT … ON CONFLICT (SHORT_URL) DO NOTHING`. The `SHORT_URL` column has a unique constraint, so exactly one row per code can exist.
+3. If the code was already taken, the service reads which URL owns it:
+   - **The same URL** (shortened earlier, or by a concurrent request): the existing link is returned. No duplicate row is created.
+   - **A different URL** (a hash collision): the service retries with a salted hash (`url + "\x00" + attempt`), up to 5 attempts. The first attempt is unsalted, so existing codes never change, and the salt sequence is deterministic, so shortening the same URL again finds its salted code. Collisions are logged.
+
+With 48-bit codes a natural collision is very unlikely, but this also stops a deliberately planted row from taking over someone else's link.
 
 ## Quick start
 
@@ -230,6 +241,14 @@ Interfaces in `src/service`, `src/repository` and `src/util` have `//go:generate
 
 Migrations live in `infrastructure/changelog/`. To add one, put a new SQL file in `sql/` and add a `changeSet` for it to `changelog.xml`. Docker Compose runs Liquibase on `make start`; run `make migrate` to apply new migrations to a running stack.
 
+| Migration | Change |
+|---|---|
+| `001` | Creates the `URLS` table |
+| `002` | Renames `COUNTER_VALUE` to `CLICK_COUNT` (default 0); old values reset, since they counted shorten requests |
+| `003` | Merges duplicate rows (summing clicks), keeps the oldest row of any collision, adds a unique constraint on `SHORT_URL`, and adds `CREATED_AT` |
+
+Never edit a migration that has already been applied: Liquibase checksums each changeset, so changes go in a new file.
+
 ## CI
 
 [GitHub Actions](.github/workflows/ci.yml) runs on every pull request and every push to `main`:
@@ -256,5 +275,4 @@ Dependabot ([config](.github/dependabot.yml)) opens weekly PRs for Go modules, G
 
 This project is being turned into a production-ready service, one item at a time. [`BACKLOG.md`](BACKLOG.md) has the full prioritized list. Known limitations right now:
 
-- Two different URLs could get the same 8-character code, and nothing detects it yet (B-05).
 - Click counts are stored but there's no API to read them yet (F-03 / F-04).
