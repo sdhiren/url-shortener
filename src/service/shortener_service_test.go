@@ -3,12 +3,14 @@ package service
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"urlshortener/mocks"
 	model "urlshortener/model/request"
 	"urlshortener/src/domain"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 )
@@ -44,12 +46,12 @@ func (suite *shortenServiceTestSuite) TearDownTest() {
 	suite.mockController.Finish()
 }
 
-func (suite *shortenServiceTestSuite) Test_Shorten_ShouldSaveAndReturnShortURL_WhenUrlDoesNotAlreadyExist() {
+func (suite *shortenServiceTestSuite) Test_Shorten_ShouldReturnShortURL_WhenCodeIsStoredForThisURL() {
+	// covers both a fresh insert and a URL shortened before; the repository returns longUrl in both cases
 	req := model.ShortenURLRequest{URL: longUrl}
 
 	suite.mockUtil.EXPECT().GenerateShortURL(longUrl).Return(shortUrl).Times(1)
-	suite.mockShortenerRepository.EXPECT().IfURLAlreadyExists(suite.context, longUrl).Return("", nil).Times(1)
-	suite.mockShortenerRepository.EXPECT().SaveShotenedURL(suite.context, longUrl, shortUrl).Return(nil).Times(1)
+	suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longUrl, shortUrl).Return(longUrl, nil).Times(1)
 
 	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
 
@@ -57,42 +59,65 @@ func (suite *shortenServiceTestSuite) Test_Shorten_ShouldSaveAndReturnShortURL_W
 	suite.Equal(host+shortUrl, actualResult)
 }
 
-func (suite *shortenServiceTestSuite) Test_Shorten_ShouldReturnExistingShortURLWithoutSaving_WhenUrlAlreadyExists() {
-	existingShortUrl := "Xy12Ab34"
+func (suite *shortenServiceTestSuite) Test_Shorten_ShouldRetryWithSaltedCode_WhenCodeCollidesWithAnotherURL() {
 	req := model.ShortenURLRequest{URL: longUrl}
+	otherUrl := "https://other.example.com"
 
-	suite.mockUtil.EXPECT().GenerateShortURL(longUrl).Return(shortUrl).Times(1)
-	suite.mockShortenerRepository.EXPECT().IfURLAlreadyExists(suite.context, longUrl).Return(existingShortUrl, nil).Times(1)
-	suite.mockShortenerRepository.EXPECT().SaveShotenedURL(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	gomock.InOrder(
+		suite.mockUtil.EXPECT().GenerateShortURL(longUrl).Return(shortUrl),
+		suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longUrl, shortUrl).Return(otherUrl, nil),
+		suite.mockUtil.EXPECT().GenerateShortURL(longUrl+"\x001").Return("Salted01"),
+		suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longUrl, "Salted01").Return(longUrl, nil),
+	)
 
 	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
 
 	suite.NoError(err)
-	suite.Equal(host+existingShortUrl, actualResult)
+	suite.Equal(host+"Salted01", actualResult)
 }
 
-func (suite *shortenServiceTestSuite) Test_Shorten_ShouldReturnWrappedError_WhenIfURLAlreadyExistsReturnsError() {
-	dbErr := errors.New("db error")
+func (suite *shortenServiceTestSuite) Test_Shorten_ShouldFindSaltedCodeAgain_WhenCollidedURLIsShortenedAgain() {
+	// a URL that got a salted code earlier walks the same deterministic sequence and
+	// stops at its own code instead of creating a new row
 	req := model.ShortenURLRequest{URL: longUrl}
 
-	suite.mockUtil.EXPECT().GenerateShortURL(longUrl).Return(shortUrl).Times(1)
-	suite.mockShortenerRepository.EXPECT().IfURLAlreadyExists(suite.context, longUrl).Return("", dbErr).Times(1)
-	suite.mockShortenerRepository.EXPECT().SaveShotenedURL(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	gomock.InOrder(
+		suite.mockUtil.EXPECT().GenerateShortURL(longUrl).Return(shortUrl),
+		suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longUrl, shortUrl).Return("https://other.example.com", nil),
+		suite.mockUtil.EXPECT().GenerateShortURL(longUrl+"\x001").Return("Salted01"),
+		suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longUrl, "Salted01").Return(longUrl, nil),
+	)
 
 	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
 
-	suite.ErrorIs(err, dbErr)
-	suite.EqualError(err, "checking if url exists: db error")
+	suite.NoError(err)
+	suite.Equal(host+"Salted01", actualResult)
+}
+
+func (suite *shortenServiceTestSuite) Test_Shorten_ShouldReturnError_WhenAllAttemptsCollide() {
+	req := model.ShortenURLRequest{URL: longUrl}
+
+	for attempt := range maxCodeAttempts {
+		code := "Code000" + strconv.Itoa(attempt)
+		suite.mockUtil.EXPECT().GenerateShortURL(saltedURL(longUrl, attempt)).Return(code).Times(1)
+		suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longUrl, code).Return("https://other.example.com", nil).Times(1)
+	}
+
+	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
+
+	suite.EqualError(err, "no free short code after 5 attempts")
+	suite.NotErrorIs(err, domain.ErrURLNotFound)
+	var invalidURLErr *domain.InvalidURLError
+	suite.False(errors.As(err, &invalidURLErr))
 	suite.Empty(actualResult)
 }
 
-func (suite *shortenServiceTestSuite) Test_Shorten_ShouldReturnWrappedError_WhenSaveShotenedURLReturnsError() {
+func (suite *shortenServiceTestSuite) Test_Shorten_ShouldStopAndReturnWrappedError_WhenRepositoryFails() {
 	dbErr := errors.New("db error")
 	req := model.ShortenURLRequest{URL: longUrl}
 
 	suite.mockUtil.EXPECT().GenerateShortURL(longUrl).Return(shortUrl).Times(1)
-	suite.mockShortenerRepository.EXPECT().IfURLAlreadyExists(suite.context, longUrl).Return("", nil).Times(1)
-	suite.mockShortenerRepository.EXPECT().SaveShotenedURL(suite.context, longUrl, shortUrl).Return(dbErr).Times(1)
+	suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longUrl, shortUrl).Return("", dbErr).Times(1)
 
 	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
 
@@ -101,18 +126,33 @@ func (suite *shortenServiceTestSuite) Test_Shorten_ShouldReturnWrappedError_When
 	suite.Empty(actualResult)
 }
 
+func (suite *shortenServiceTestSuite) Test_Shorten_ShouldStopRetrying_WhenRepositoryFailsAfterCollision() {
+	dbErr := errors.New("db error")
+	req := model.ShortenURLRequest{URL: longUrl}
+
+	gomock.InOrder(
+		suite.mockUtil.EXPECT().GenerateShortURL(longUrl).Return(shortUrl),
+		suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longUrl, shortUrl).Return("https://other.example.com", nil),
+		suite.mockUtil.EXPECT().GenerateShortURL(longUrl+"\x001").Return("Salted01"),
+		suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longUrl, "Salted01").Return("", dbErr),
+	)
+
+	_, err := suite.shortenerService.Shorten(suite.context, req)
+
+	suite.ErrorIs(err, dbErr)
+}
+
 func (suite *shortenServiceTestSuite) Test_Shorten_ShouldNotReturnErrorTextAsShortURL_WhenRepositoryFails() {
 	req := model.ShortenURLRequest{URL: longUrl}
 
 	suite.mockUtil.EXPECT().GenerateShortURL(longUrl).Return(shortUrl).Times(1)
-	suite.mockShortenerRepository.EXPECT().IfURLAlreadyExists(suite.context, longUrl).Return("", errors.New("pq: connection refused")).Times(1)
+	suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longUrl, shortUrl).Return("", errors.New("pq: connection refused")).Times(1)
 
 	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
 
 	suite.Error(err)
 	suite.Empty(actualResult)
 }
-
 func (suite *shortenServiceTestSuite) Test_ResolveShortURL_ShouldRecordClickAndReturnLongURL_WhenCodeExists() {
 	suite.mockShortenerRepository.EXPECT().RecordClick(suite.context, shortUrl).Return(longUrl, nil).Times(1)
 
@@ -211,8 +251,7 @@ func (suite *shortenServiceTestSuite) Test_Shorten_ShouldReturnInvalidURLErrorWi
 		suite.Run(name, func() {
 			suite.SetupTest()
 			suite.mockUtil.EXPECT().GenerateShortURL(gomock.Any()).Times(0)
-			suite.mockShortenerRepository.EXPECT().IfURLAlreadyExists(gomock.Any(), gomock.Any()).Times(0)
-			suite.mockShortenerRepository.EXPECT().SaveShotenedURL(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+			suite.mockShortenerRepository.EXPECT().SaveShortURL(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 
 			actualResult, err := suite.shortenerService.Shorten(suite.context, model.ShortenURLRequest{URL: invalidUrl})
 
@@ -227,8 +266,7 @@ func (suite *shortenServiceTestSuite) Test_Shorten_ShouldUseTrimmedURL_WhenURLHa
 	req := model.ShortenURLRequest{URL: "  \t" + longUrl + "\n "}
 
 	suite.mockUtil.EXPECT().GenerateShortURL(longUrl).Return(shortUrl).Times(1)
-	suite.mockShortenerRepository.EXPECT().IfURLAlreadyExists(suite.context, longUrl).Return("", nil).Times(1)
-	suite.mockShortenerRepository.EXPECT().SaveShotenedURL(suite.context, longUrl, shortUrl).Return(nil).Times(1)
+	suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longUrl, shortUrl).Return(longUrl, nil).Times(1)
 
 	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
 
@@ -241,8 +279,7 @@ func (suite *shortenServiceTestSuite) Test_Shorten_ShouldSkipSelfLinkCheck_WhenH
 	req := model.ShortenURLRequest{URL: longUrl}
 
 	suite.mockUtil.EXPECT().GenerateShortURL(longUrl).Return(shortUrl).Times(1)
-	suite.mockShortenerRepository.EXPECT().IfURLAlreadyExists(suite.context, longUrl).Return("", nil).Times(1)
-	suite.mockShortenerRepository.EXPECT().SaveShotenedURL(suite.context, longUrl, shortUrl).Return(nil).Times(1)
+	suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longUrl, shortUrl).Return(longUrl, nil).Times(1)
 
 	actualResult, err := service.Shorten(suite.context, req)
 
@@ -291,4 +328,18 @@ func (suite *shortenServiceTestSuite) Test_LookupShortURL_ShouldReturnErrURLNotF
 			suite.ErrorIs(err, domain.ErrURLNotFound)
 		})
 	}
+}
+
+func TestSaltedURL(t *testing.T) {
+	assert.Equal(t, "https://example.com", saltedURL("https://example.com", 0))
+	assert.Equal(t, "https://example.com\x001", saltedURL("https://example.com", 1))
+	assert.Equal(t, "https://example.com\x004", saltedURL("https://example.com", 4))
+	// deterministic: the same attempt always gives the same input
+	assert.Equal(t, saltedURL("https://example.com", 2), saltedURL("https://example.com", 2))
+	// every attempt gives a different input, so a different code
+	seen := map[string]bool{}
+	for attempt := range maxCodeAttempts {
+		seen[saltedURL("https://example.com", attempt)] = true
+	}
+	assert.Len(t, seen, maxCodeAttempts)
 }
