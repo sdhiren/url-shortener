@@ -55,21 +55,6 @@ func (mr *MockShortenerRepositoryMockRecorder) GetLongURL(ctx, shortenedURL any)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLongURL", reflect.TypeOf((*MockShortenerRepository)(nil).GetLongURL), ctx, shortenedURL)
 }
 
-// IfURLAlreadyExists mocks base method.
-func (m *MockShortenerRepository) IfURLAlreadyExists(ctx context.Context, longURL string) (string, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "IfURLAlreadyExists", ctx, longURL)
-	ret0, _ := ret[0].(string)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// IfURLAlreadyExists indicates an expected call of IfURLAlreadyExists.
-func (mr *MockShortenerRepositoryMockRecorder) IfURLAlreadyExists(ctx, longURL any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IfURLAlreadyExists", reflect.TypeOf((*MockShortenerRepository)(nil).IfURLAlreadyExists), ctx, longURL)
-}
-
 // RecordClick mocks base method.
 func (m *MockShortenerRepository) RecordClick(ctx context.Context, shortenedURL string) (string, error) {
 	m.ctrl.T.Helper()
@@ -85,16 +70,17 @@ func (mr *MockShortenerRepositoryMockRecorder) RecordClick(ctx, shortenedURL any
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecordClick", reflect.TypeOf((*MockShortenerRepository)(nil).RecordClick), ctx, shortenedURL)
 }
 
-// SaveShotenedURL mocks base method.
-func (m *MockShortenerRepository) SaveShotenedURL(ctx context.Context, url, shortenedURL string) error {
+// SaveShortURL mocks base method.
+func (m *MockShortenerRepository) SaveShortURL(ctx context.Context, longURL, shortenedURL string) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SaveShotenedURL", ctx, url, shortenedURL)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret := m.ctrl.Call(m, "SaveShortURL", ctx, longURL, shortenedURL)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
-// SaveShotenedURL indicates an expected call of SaveShotenedURL.
-func (mr *MockShortenerRepositoryMockRecorder) SaveShotenedURL(ctx, url, shortenedURL any) *gomock.Call {
+// SaveShortURL indicates an expected call of SaveShortURL.
+func (mr *MockShortenerRepositoryMockRecorder) SaveShortURL(ctx, longURL, shortenedURL any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveShotenedURL", reflect.TypeOf((*MockShortenerRepository)(nil).SaveShotenedURL), ctx, url, shortenedURL)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveShortURL", reflect.TypeOf((*MockShortenerRepository)(nil).SaveShortURL), ctx, longURL, shortenedURL)
 }
