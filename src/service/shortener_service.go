@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/url"
 	"strconv"
-	model "urlshortener/model/request"
+
+	"urlshortener/model/request"
 	"urlshortener/src/domain"
+	"urlshortener/src/logging"
 	"urlshortener/src/repository"
 	"urlshortener/src/util"
 )
@@ -16,7 +17,7 @@ import (
 //go:generate go tool mockgen -source=shortener_service.go -destination=../../mocks/shortener_service_mock.go -package=mocks
 
 type ShortenService interface {
-	Shorten(context context.Context, req model.ShortenURLRequest) (string, error)
+	Shorten(ctx context.Context, req request.ShortenURLRequest) (string, error)
 	// ResolveShortURL records a click on code and returns its long URL, or
 	// domain.ErrURLNotFound if the code is malformed or unknown.
 	ResolveShortURL(ctx context.Context, code string) (string, error)
@@ -50,7 +51,7 @@ func NewShortenerService(host string, repo repository.ShortenerRepository, util 
 	return &shortenService{host: host, baseURL: baseURL, repo: repo, util: util}
 }
 
-func (ss *shortenService) Shorten(ctx context.Context, req model.ShortenURLRequest) (string, error) {
+func (ss *shortenService) Shorten(ctx context.Context, req request.ShortenURLRequest) (string, error) {
 	longURL, err := validateLongURL(req.URL, ss.baseURL)
 	if err != nil {
 		return "", err
@@ -66,7 +67,8 @@ func (ss *shortenService) Shorten(ctx context.Context, req model.ShortenURLReque
 		if storedURL == longURL {
 			return ss.host + code, nil
 		}
-		log.Printf("short code %q collides with another url (attempt %d of %d), retrying", code, attempt+1, maxCodeAttempts)
+		logging.FromContext(ctx).Warn("short code collides with another url, retrying",
+			"code", code, "attempt", attempt+1, "max_attempts", maxCodeAttempts)
 	}
 	return "", fmt.Errorf("no free short code after %d attempts", maxCodeAttempts)
 }
