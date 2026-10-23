@@ -11,14 +11,16 @@ import (
 //go:generate go tool mockgen -source=shortener_repository.go -destination=../../mocks/shortener_repository_mock.go -package=mocks
 
 type ShortenerRepository interface {
-	SaveShotenedURL(ctx context.Context, url, shortenedURL string) error
+	// SaveShortURL stores shortenedURL -> longURL unless shortenedURL is already
+	// taken, and returns the long URL stored for shortenedURL afterwards: longURL
+	// itself if it was inserted now or earlier, or a different URL on a collision.
+	SaveShortURL(ctx context.Context, longURL, shortenedURL string) (string, error)
 	// RecordClick atomically increments the click count for shortenedURL and returns
 	// its long URL, or domain.ErrURLNotFound if the short URL doesn't exist.
 	RecordClick(ctx context.Context, shortenedURL string) (string, error)
 	// GetLongURL returns the long URL for shortenedURL without counting a click,
 	// or domain.ErrURLNotFound if the short URL doesn't exist.
 	GetLongURL(ctx context.Context, shortenedURL string) (string, error)
-	IfURLAlreadyExists(ctx context.Context, longURL string) (string, error)
 }
 
 type shortenerRepository struct {
@@ -29,12 +31,34 @@ func NewShortenerRepository(db *sql.DB) ShortenerRepository {
 	return &shortenerRepository{db: db}
 }
 
-func (sr *shortenerRepository) SaveShotenedURL(ctx context.Context, url, shortenedURL string) error {
-	_, err := sr.db.ExecContext(ctx, "INSERT INTO URLS (LONG_URL, SHORT_URL) VALUES ($1, $2)", url, shortenedURL)
+func (sr *shortenerRepository) SaveShortURL(ctx context.Context, longURL, shortenedURL string) (string, error) {
+	// ON CONFLICT makes concurrent requests for the same code safe: exactly one insert
+	// wins, and the others fall through to reading what was stored
+	result, err := sr.db.ExecContext(ctx,
+		"INSERT INTO URLS (LONG_URL, SHORT_URL) VALUES ($1, $2) ON CONFLICT (SHORT_URL) DO NOTHING",
+		longURL, shortenedURL,
+	)
 	if err != nil {
-		return fmt.Errorf("inserting short url %q: %w", shortenedURL, err)
+		return "", fmt.Errorf("inserting short url %q: %w", shortenedURL, err)
 	}
-	return nil
+	inserted, err := result.RowsAffected()
+	if err != nil {
+		return "", fmt.Errorf("inserting short url %q: %w", shortenedURL, err)
+	}
+	if inserted == 1 {
+		return longURL, nil
+	}
+
+	// a separate statement gets a fresh snapshot, so it sees the row that won the conflict
+	storedURL, err := sr.GetLongURL(ctx, shortenedURL)
+	if errors.Is(err, domain.ErrURLNotFound) {
+		// not a 404 for the caller: the row existed a moment ago and was removed concurrently
+		return "", fmt.Errorf("short url %q was taken but no longer exists", shortenedURL)
+	}
+	if err != nil {
+		return "", fmt.Errorf("reading taken short url: %w", err)
+	}
+	return storedURL, nil
 }
 
 func (sr *shortenerRepository) RecordClick(ctx context.Context, shortenedURL string) (string, error) {
@@ -63,17 +87,4 @@ func (sr *shortenerRepository) GetLongURL(ctx context.Context, shortenedURL stri
 		return "", fmt.Errorf("reading long url for %q: %w", shortenedURL, err)
 	}
 	return longURL, nil
-}
-
-// IfURLAlreadyExists returns the short URL already stored for longURL, or "" if there is none.
-func (sr *shortenerRepository) IfURLAlreadyExists(ctx context.Context, longURL string) (string, error) {
-	var shortURL string
-	err := sr.db.QueryRowContext(ctx, "SELECT SHORT_URL FROM URLS WHERE LONG_URL = $1", longURL).Scan(&shortURL)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("looking up existing short url: %w", err)
-	}
-	return shortURL, nil
 }

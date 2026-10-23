@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/url"
+	"strconv"
 	model "urlshortener/model/request"
 	"urlshortener/src/domain"
 	"urlshortener/src/repository"
@@ -23,8 +25,13 @@ type ShortenService interface {
 	LookupShortURL(ctx context.Context, code string) (string, error)
 }
 
-// maxCodeLength matches the SHORT_URL varchar(20) column.
-const maxCodeLength = 20
+const (
+	// maxCodeLength matches the SHORT_URL varchar(20) column.
+	maxCodeLength = 20
+	// maxCodeAttempts bounds retries after hash collisions. With 48-bit codes even one
+	// collision is very unlikely, so needing all attempts means something is wrong.
+	maxCodeAttempts = 5
+)
 
 type shortenService struct {
 	host    string
@@ -43,28 +50,35 @@ func NewShortenerService(host string, repo repository.ShortenerRepository, util 
 	return &shortenService{host: host, baseURL: baseURL, repo: repo, util: util}
 }
 
-func (ss *shortenService) Shorten(context context.Context, req model.ShortenURLRequest) (string, error) {
-	longUrl, err := validateLongURL(req.URL, ss.baseURL)
+func (ss *shortenService) Shorten(ctx context.Context, req model.ShortenURLRequest) (string, error) {
+	longURL, err := validateLongURL(req.URL, ss.baseURL)
 	if err != nil {
 		return "", err
 	}
 
-	shortUrl := ss.util.GenerateShortURL(longUrl)
+	for attempt := range maxCodeAttempts {
+		code := ss.util.GenerateShortURL(saltedURL(longURL, attempt))
+		storedURL, err := ss.repo.SaveShortURL(ctx, longURL, code)
+		if err != nil {
+			return "", fmt.Errorf("saving short url: %w", err)
+		}
+		// the code is ours, whether inserted now or by an earlier/concurrent request
+		if storedURL == longURL {
+			return ss.host + code, nil
+		}
+		log.Printf("short code %q collides with another url (attempt %d of %d), retrying", code, attempt+1, maxCodeAttempts)
+	}
+	return "", fmt.Errorf("no free short code after %d attempts", maxCodeAttempts)
+}
 
-	// check if long url already exists in the db
-	dbShortUrl, err := ss.repo.IfURLAlreadyExists(context, longUrl)
-	if err != nil {
-		return "", fmt.Errorf("checking if url exists: %w", err)
+// saltedURL returns the hash input for an attempt. Attempt 0 is the URL itself, so
+// codes stay stable; later attempts append a salt to get a different code after a
+// collision. It's deterministic, so shortening the same URL again finds the same code.
+func saltedURL(longURL string, attempt int) string {
+	if attempt == 0 {
+		return longURL
 	}
-	if dbShortUrl != "" {
-		return ss.host + dbShortUrl, nil
-	}
-
-	// save url in the database
-	if err := ss.repo.SaveShotenedURL(context, longUrl, shortUrl); err != nil {
-		return "", fmt.Errorf("saving short url: %w", err)
-	}
-	return ss.host + shortUrl, nil
+	return longURL + "\x00" + strconv.Itoa(attempt)
 }
 
 func (ss *shortenService) ResolveShortURL(ctx context.Context, code string) (string, error) {

@@ -9,4 +9,7 @@
     <changeSet id="002" author="dhiren">
         <sqlFile path="./liquibase/changelog/sql/002_rename_counter_to_click_count.sql"/>
     </changeSet>
+    <changeSet id="003" author="dhiren">
+        <sqlFile path="./liquibase/changelog/sql/003_unique_short_url_and_created_at.sql"/>
+    </changeSet>
 </databaseChangeLog>

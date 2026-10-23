@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"urlshortener/src/util"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gin-gonic/gin"
@@ -111,7 +112,7 @@ func TestRedirect_EachRequestRecordsOneClick(t *testing.T) {
 func TestRedirect_HeadRedirectsWithoutRecordingClick(t *testing.T) {
 	// only the SELECT is expected; sqlmock fails the test if the click UPDATE runs
 	r, mock := newTestRouter(t, "https://sho.rt/")
-	mock.ExpectQuery("SELECT LONG_URL FROM URLS WHERE SHORT_URL = $1").WithArgs("Lc4KTFBE").
+	mock.ExpectQuery(getLongURLQuery).WithArgs("Lc4KTFBE").
 		WillReturnRows(sqlmock.NewRows([]string{"long_url"}).AddRow("https://example.com/a"))
 
 	recorder := serve(r, http.MethodHead, "/Lc4KTFBE", "")
@@ -174,29 +175,60 @@ func TestRedirect_DatabaseErrorReturnsInternalServerError(t *testing.T) {
 	assert.JSONEq(t, `{"error": "internal server error"}`, recorder.Body.String())
 }
 
+const (
+	insertQuery     = "INSERT INTO URLS (LONG_URL, SHORT_URL) VALUES ($1, $2) ON CONFLICT (SHORT_URL) DO NOTHING"
+	getLongURLQuery = "SELECT LONG_URL FROM URLS WHERE SHORT_URL = $1"
+)
+
 func TestShorten_ReturnsShortURLUnderBaseURL(t *testing.T) {
 	r, mock := newTestRouter(t, "https://example.com/s/")
-	mock.ExpectQuery("SELECT SHORT_URL FROM URLS WHERE LONG_URL = $1").WithArgs("https://example.com/a").
-		WillReturnRows(sqlmock.NewRows([]string{"short_url"}))
-	mock.ExpectExec("INSERT INTO URLS (LONG_URL, SHORT_URL) VALUES ($1, $2)").WithArgs("https://example.com/a", sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(1, 1))
+	code := util.NewUtil().GenerateShortURL("https://example.com/a")
+	mock.ExpectExec(insertQuery).WithArgs("https://example.com/a", code).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	recorder := serve(r, http.MethodPost, "/shorten", `{"url": "https://example.com/a"}`)
 
 	assert.Equal(t, http.StatusOK, recorder.Code)
-	assert.Regexp(t, `^\{"short_url":"https://example\.com/s/[A-Za-z0-9_-]{8}"\}$`, recorder.Body.String())
+	assert.JSONEq(t, `{"short_url": "https://example.com/s/`+code+`"}`, recorder.Body.String())
 }
 
-func TestShorten_ExistingURLDoesNotRecordClick(t *testing.T) {
-	// only the lookup runs: shortening an existing URL no longer bumps the counter
+func TestShorten_ExistingURLReturnsSameCodeWithoutNewRowOrClick(t *testing.T) {
+	// the insert hits the unique constraint, then the stored row is read; no UPDATE runs
 	r, mock := newTestRouter(t, "https://sho.rt/")
-	mock.ExpectQuery("SELECT SHORT_URL FROM URLS WHERE LONG_URL = $1").WithArgs("https://example.com/a").
-		WillReturnRows(sqlmock.NewRows([]string{"short_url"}).AddRow("Lc4KTFBE"))
+	code := util.NewUtil().GenerateShortURL("https://example.com/a")
+	mock.ExpectExec(insertQuery).WithArgs("https://example.com/a", code).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(getLongURLQuery).WithArgs(code).
+		WillReturnRows(sqlmock.NewRows([]string{"long_url"}).AddRow("https://example.com/a"))
 
 	recorder := serve(r, http.MethodPost, "/shorten", `{"url": "https://example.com/a"}`)
 
 	assert.Equal(t, http.StatusOK, recorder.Code)
-	assert.JSONEq(t, `{"short_url": "https://sho.rt/Lc4KTFBE"}`, recorder.Body.String())
+	assert.JSONEq(t, `{"short_url": "https://sho.rt/`+code+`"}`, recorder.Body.String())
+}
+
+func TestShorten_CollisionGetsDifferentCode(t *testing.T) {
+	r, mock := newTestRouter(t, "https://sho.rt/")
+	firstCode := util.NewUtil().GenerateShortURL("https://example.com/a")
+	saltedCode := util.NewUtil().GenerateShortURL("https://example.com/a\x001")
+	require.NotEqual(t, firstCode, saltedCode)
+	mock.ExpectExec(insertQuery).WithArgs("https://example.com/a", firstCode).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(getLongURLQuery).WithArgs(firstCode).
+		WillReturnRows(sqlmock.NewRows([]string{"long_url"}).AddRow("https://other.example.com"))
+	mock.ExpectExec(insertQuery).WithArgs("https://example.com/a", saltedCode).WillReturnResult(sqlmock.NewResult(1, 1))
+
+	recorder := serve(r, http.MethodPost, "/shorten", `{"url": "https://example.com/a"}`)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.JSONEq(t, `{"short_url": "https://sho.rt/`+saltedCode+`"}`, recorder.Body.String())
+}
+
+func TestShorten_DatabaseErrorReturnsInternalServerError(t *testing.T) {
+	r, mock := newTestRouter(t, "https://sho.rt/")
+	mock.ExpectExec(insertQuery).WithArgs("https://example.com/a", sqlmock.AnyArg()).WillReturnError(sql.ErrConnDone)
+
+	recorder := serve(r, http.MethodPost, "/shorten", `{"url": "https://example.com/a"}`)
+
+	assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+	assert.JSONEq(t, `{"error": "internal server error"}`, recorder.Body.String())
 }
 
 func TestRouter_UnknownRouteReturnsNotFound(t *testing.T) {
