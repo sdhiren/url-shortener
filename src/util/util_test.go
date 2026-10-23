@@ -10,7 +10,7 @@ func TestGenerateShortURL(t *testing.T) {
 
 	testCases := []struct {
 		longURL string
-		wantUrl string
+		wantURL string
 	}{
 		{"https://www.example.com/1", "xiGD94yi"},
 		{"https://www.example.com/2", "A7L4mBG1"},
@@ -21,7 +21,7 @@ func TestGenerateShortURL(t *testing.T) {
 	util := NewUtil()
 
 	for _, test := range testCases {
-		expUrl := util.GenerateShortURL(test.longURL)
-		assert.Equal(t, expUrl, test.wantUrl)
+		expURL := util.GenerateShortURL(test.longURL)
+		assert.Equal(t, expURL, test.wantURL)
 	}
 }

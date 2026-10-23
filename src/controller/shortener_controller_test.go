@@ -1,15 +1,21 @@
 package controller
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
 	"urlshortener/mocks"
-	model "urlshortener/model/request"
+	"urlshortener/model/request"
 	"urlshortener/src/domain"
+	"urlshortener/src/logging"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/suite"
@@ -52,6 +58,12 @@ func (suite *shortenerControllerTestSuite) setRedirectRequest(code string) {
 	suite.context.Params = []gin.Param{{Key: "code", Value: code}}
 }
 
+// requestContext is the context of the current HTTP request, which handlers must
+// pass to the service instead of the *gin.Context itself.
+func (suite *shortenerControllerTestSuite) requestContext() context.Context {
+	return suite.context.Request.Context()
+}
+
 func (suite *shortenerControllerTestSuite) assertResponse(wantStatus int, wantBody string) {
 	suite.Equal(wantStatus, suite.recorder.Code)
 	suite.JSONEq(wantBody, suite.recorder.Body.String())
@@ -60,8 +72,8 @@ func (suite *shortenerControllerTestSuite) assertResponse(wantStatus int, wantBo
 
 func (suite *shortenerControllerTestSuite) Test_Shorten_ShouldReturnOKWithShortURL() {
 	suite.setShortenRequest(`{"url": "www.test.com"}`)
-	req := model.ShortenURLRequest{URL: "www.test.com"}
-	suite.mockShortenService.EXPECT().Shorten(suite.context, req).Return("http://localhost:8080/Z9cJpkVn", nil).Times(1)
+	req := request.ShortenURLRequest{URL: "www.test.com"}
+	suite.mockShortenService.EXPECT().Shorten(suite.requestContext(), req).Return("http://localhost:8080/Z9cJpkVn", nil).Times(1)
 
 	suite.shortenerController.Shorten(suite.context)
 
@@ -70,8 +82,8 @@ func (suite *shortenerControllerTestSuite) Test_Shorten_ShouldReturnOKWithShortU
 
 func (suite *shortenerControllerTestSuite) Test_Shorten_ShouldIgnoreUnknownFields() {
 	suite.setShortenRequest(`{"url": "www.test.com", "extra": true}`)
-	req := model.ShortenURLRequest{URL: "www.test.com"}
-	suite.mockShortenService.EXPECT().Shorten(suite.context, req).Return("http://localhost:8080/Z9cJpkVn", nil).Times(1)
+	req := request.ShortenURLRequest{URL: "www.test.com"}
+	suite.mockShortenService.EXPECT().Shorten(suite.requestContext(), req).Return("http://localhost:8080/Z9cJpkVn", nil).Times(1)
 
 	suite.shortenerController.Shorten(suite.context)
 
@@ -125,7 +137,7 @@ func (suite *shortenerControllerTestSuite) Test_Shorten_ShouldReturnBadRequest_W
 
 func (suite *shortenerControllerTestSuite) Test_Shorten_ShouldReturnInternalServerErrorWithoutLeakingDetails_WhenServiceFails() {
 	suite.setShortenRequest(`{"url": "www.test.com"}`)
-	suite.mockShortenService.EXPECT().Shorten(suite.context, gomock.Any()).
+	suite.mockShortenService.EXPECT().Shorten(suite.requestContext(), gomock.Any()).
 		Return("", errors.New("saving short url: pq: password authentication failed for user primus")).Times(1)
 
 	suite.shortenerController.Shorten(suite.context)
@@ -136,7 +148,7 @@ func (suite *shortenerControllerTestSuite) Test_Shorten_ShouldReturnInternalServ
 
 func (suite *shortenerControllerTestSuite) Test_Shorten_ShouldReturnNotFound_WhenServiceReturnsErrURLNotFound() {
 	suite.setShortenRequest(`{"url": "www.test.com"}`)
-	suite.mockShortenService.EXPECT().Shorten(suite.context, gomock.Any()).Return("", domain.ErrURLNotFound).Times(1)
+	suite.mockShortenService.EXPECT().Shorten(suite.requestContext(), gomock.Any()).Return("", domain.ErrURLNotFound).Times(1)
 
 	suite.shortenerController.Shorten(suite.context)
 
@@ -145,7 +157,7 @@ func (suite *shortenerControllerTestSuite) Test_Shorten_ShouldReturnNotFound_Whe
 
 func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldRedirectWith302ToLongURL() {
 	suite.setRedirectRequest("7RtNmD6Z")
-	suite.mockShortenService.EXPECT().ResolveShortURL(suite.context, "7RtNmD6Z").Return("https://www.example.com/3", nil).Times(1)
+	suite.mockShortenService.EXPECT().ResolveShortURL(suite.requestContext(), "7RtNmD6Z").Return("https://www.example.com/3", nil).Times(1)
 
 	suite.shortenerController.Redirect(suite.context)
 	suite.context.Writer.WriteHeaderNow()
@@ -166,7 +178,7 @@ func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldKeepLongURLExactl
 		suite.Run(longURL, func() {
 			suite.SetupTest()
 			suite.setRedirectRequest("7RtNmD6Z")
-			suite.mockShortenService.EXPECT().ResolveShortURL(suite.context, "7RtNmD6Z").Return(longURL, nil).Times(1)
+			suite.mockShortenService.EXPECT().ResolveShortURL(suite.requestContext(), "7RtNmD6Z").Return(longURL, nil).Times(1)
 
 			suite.shortenerController.Redirect(suite.context)
 			suite.context.Writer.WriteHeaderNow()
@@ -180,7 +192,7 @@ func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldKeepLongURLExactl
 func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldPercentEncodeNonASCIIInLocation() {
 	// HTTP headers must be ASCII; browsers decode this back to https://münchen.de/straße
 	suite.setRedirectRequest("7RtNmD6Z")
-	suite.mockShortenService.EXPECT().ResolveShortURL(suite.context, "7RtNmD6Z").Return("https://münchen.de/straße", nil).Times(1)
+	suite.mockShortenService.EXPECT().ResolveShortURL(suite.requestContext(), "7RtNmD6Z").Return("https://münchen.de/straße", nil).Times(1)
 
 	suite.shortenerController.Redirect(suite.context)
 	suite.context.Writer.WriteHeaderNow()
@@ -191,7 +203,7 @@ func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldPercentEncodeNonA
 
 func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldPassCodeFromPathToService() {
 	suite.setRedirectRequest("qv3-bns9")
-	suite.mockShortenService.EXPECT().ResolveShortURL(suite.context, "qv3-bns9").Return("https://example.com", nil).Times(1)
+	suite.mockShortenService.EXPECT().ResolveShortURL(suite.requestContext(), "qv3-bns9").Return("https://example.com", nil).Times(1)
 
 	suite.shortenerController.Redirect(suite.context)
 	suite.context.Writer.WriteHeaderNow()
@@ -201,7 +213,7 @@ func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldPassCodeFromPathT
 
 func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldReturnNotFoundWithoutRedirect_WhenCodeDoesNotExist() {
 	suite.setRedirectRequest("unknown1")
-	suite.mockShortenService.EXPECT().ResolveShortURL(suite.context, "unknown1").Return("", domain.ErrURLNotFound).Times(1)
+	suite.mockShortenService.EXPECT().ResolveShortURL(suite.requestContext(), "unknown1").Return("", domain.ErrURLNotFound).Times(1)
 
 	suite.shortenerController.Redirect(suite.context)
 
@@ -212,7 +224,7 @@ func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldReturnNotFoundWit
 func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldReturnNotFound_WhenErrURLNotFoundIsWrapped() {
 	suite.setRedirectRequest("unknown1")
 	wrapped := fmt.Errorf("lookup: %w", domain.ErrURLNotFound)
-	suite.mockShortenService.EXPECT().ResolveShortURL(suite.context, "unknown1").Return("", wrapped).Times(1)
+	suite.mockShortenService.EXPECT().ResolveShortURL(suite.requestContext(), "unknown1").Return("", wrapped).Times(1)
 
 	suite.shortenerController.Redirect(suite.context)
 
@@ -221,7 +233,7 @@ func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldReturnNotFound_Wh
 
 func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldReturnInternalServerErrorWithoutLeakingDetails_WhenServiceFails() {
 	suite.setRedirectRequest("7RtNmD6Z")
-	suite.mockShortenService.EXPECT().ResolveShortURL(suite.context, "7RtNmD6Z").
+	suite.mockShortenService.EXPECT().ResolveShortURL(suite.requestContext(), "7RtNmD6Z").
 		Return("", errors.New("resolving short url: pq: relation \"urls\" does not exist")).Times(1)
 
 	suite.shortenerController.Redirect(suite.context)
@@ -234,7 +246,7 @@ func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldReturnInternalSer
 func (suite *shortenerControllerTestSuite) Test_Shorten_ShouldReturnBadRequestWithReason_WhenURLIsInvalid() {
 	suite.setShortenRequest(`{"url": "ftp://example.com"}`)
 	invalidErr := &domain.InvalidURLError{Reason: "url must start with http:// or https://"}
-	suite.mockShortenService.EXPECT().Shorten(suite.context, gomock.Any()).Return("", invalidErr).Times(1)
+	suite.mockShortenService.EXPECT().Shorten(suite.requestContext(), gomock.Any()).Return("", invalidErr).Times(1)
 
 	suite.shortenerController.Shorten(suite.context)
 
@@ -244,7 +256,7 @@ func (suite *shortenerControllerTestSuite) Test_Shorten_ShouldReturnBadRequestWi
 func (suite *shortenerControllerTestSuite) Test_Shorten_ShouldReturnBadRequestWithoutWrapperText_WhenInvalidURLErrorIsWrapped() {
 	suite.setShortenRequest(`{"url": "https://sho.rt/abc"}`)
 	wrapped := fmt.Errorf("internal context: %w", &domain.InvalidURLError{Reason: "url must not point to this url shortener"})
-	suite.mockShortenService.EXPECT().Shorten(suite.context, gomock.Any()).Return("", wrapped).Times(1)
+	suite.mockShortenService.EXPECT().Shorten(suite.requestContext(), gomock.Any()).Return("", wrapped).Times(1)
 
 	suite.shortenerController.Shorten(suite.context)
 
@@ -255,7 +267,7 @@ func (suite *shortenerControllerTestSuite) Test_Shorten_ShouldReturnBadRequestWi
 func (suite *shortenerControllerTestSuite) Test_Redirect_HeadRequestShouldRedirectWithoutRecordingClick() {
 	suite.context.Request = httptest.NewRequest(http.MethodHead, "/7RtNmD6Z", nil)
 	suite.context.Params = []gin.Param{{Key: "code", Value: "7RtNmD6Z"}}
-	suite.mockShortenService.EXPECT().LookupShortURL(suite.context, "7RtNmD6Z").Return("https://www.example.com/3", nil).Times(1)
+	suite.mockShortenService.EXPECT().LookupShortURL(suite.requestContext(), "7RtNmD6Z").Return("https://www.example.com/3", nil).Times(1)
 	suite.mockShortenService.EXPECT().ResolveShortURL(gomock.Any(), gomock.Any()).Times(0)
 
 	suite.shortenerController.Redirect(suite.context)
@@ -269,7 +281,7 @@ func (suite *shortenerControllerTestSuite) Test_Redirect_HeadRequestShouldRedire
 func (suite *shortenerControllerTestSuite) Test_Redirect_HeadRequestShouldReturnNotFound_WhenCodeDoesNotExist() {
 	suite.context.Request = httptest.NewRequest(http.MethodHead, "/unknown1", nil)
 	suite.context.Params = []gin.Param{{Key: "code", Value: "unknown1"}}
-	suite.mockShortenService.EXPECT().LookupShortURL(suite.context, "unknown1").Return("", domain.ErrURLNotFound).Times(1)
+	suite.mockShortenService.EXPECT().LookupShortURL(suite.requestContext(), "unknown1").Return("", domain.ErrURLNotFound).Times(1)
 
 	suite.shortenerController.Redirect(suite.context)
 
@@ -279,11 +291,73 @@ func (suite *shortenerControllerTestSuite) Test_Redirect_HeadRequestShouldReturn
 
 func (suite *shortenerControllerTestSuite) Test_Redirect_GetRequestShouldRecordClickNotJustLookup() {
 	suite.setRedirectRequest("7RtNmD6Z")
-	suite.mockShortenService.EXPECT().ResolveShortURL(suite.context, "7RtNmD6Z").Return("https://www.example.com/3", nil).Times(1)
+	suite.mockShortenService.EXPECT().ResolveShortURL(suite.requestContext(), "7RtNmD6Z").Return("https://www.example.com/3", nil).Times(1)
 	suite.mockShortenService.EXPECT().LookupShortURL(gomock.Any(), gomock.Any()).Times(0)
 
 	suite.shortenerController.Redirect(suite.context)
 	suite.context.Writer.WriteHeaderNow()
 
 	suite.Equal(http.StatusFound, suite.recorder.Code)
+}
+
+type ctxKey struct{}
+
+// Q-01: handlers pass the request's context, so cancellation and request-scoped
+// values (like the request logger) reach the service and the database.
+func (suite *shortenerControllerTestSuite) Test_Shorten_ShouldPassRequestContextToService() {
+	suite.setShortenRequest(`{"url": "https://example.com"}`)
+	suite.context.Request = suite.context.Request.WithContext(context.WithValue(suite.requestContext(), ctxKey{}, "marker"))
+	suite.mockShortenService.EXPECT().Shorten(gomock.Cond(func(ctx context.Context) bool {
+		return ctx.Value(ctxKey{}) == "marker"
+	}), gomock.Any()).Return("http://localhost:8080/Z9cJpkVn", nil).Times(1)
+
+	suite.shortenerController.Shorten(suite.context)
+
+	suite.Equal(http.StatusOK, suite.recorder.Code)
+}
+
+func (suite *shortenerControllerTestSuite) Test_Redirect_ShouldPassCancellationToService() {
+	suite.setRedirectRequest("7RtNmD6Z")
+	ctx, cancel := context.WithCancel(suite.requestContext())
+	cancel()
+	suite.context.Request = suite.context.Request.WithContext(ctx)
+	suite.mockShortenService.EXPECT().ResolveShortURL(gomock.Cond(func(ctx context.Context) bool {
+		return errors.Is(ctx.Err(), context.Canceled)
+	}), "7RtNmD6Z").Return("", context.Canceled).Times(1)
+
+	suite.shortenerController.Redirect(suite.context)
+
+	suite.Equal(http.StatusInternalServerError, suite.recorder.Code)
+}
+
+func (suite *shortenerControllerTestSuite) Test_RespondWithError_ShouldLogInternalErrorsWithRequestLogger() {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil)).With("request_id", "req-123")
+	suite.setRedirectRequest("7RtNmD6Z")
+	suite.context.Request = suite.context.Request.WithContext(logging.WithLogger(suite.requestContext(), logger))
+	suite.mockShortenService.EXPECT().ResolveShortURL(gomock.Any(), "7RtNmD6Z").
+		Return("", errors.New("resolving short url: connection refused")).Times(1)
+
+	suite.shortenerController.Redirect(suite.context)
+
+	suite.Equal(http.StatusInternalServerError, suite.recorder.Code)
+	var entry map[string]any
+	suite.Require().NoError(json.Unmarshal(logs.Bytes(), &entry))
+	suite.Equal("ERROR", entry["level"])
+	suite.Equal("request failed", entry["msg"])
+	suite.Equal("resolving short url: connection refused", entry["error"])
+	suite.Equal("req-123", entry["request_id"])
+}
+
+func (suite *shortenerControllerTestSuite) Test_RespondWithError_ShouldNotLogClientErrors() {
+	var logs bytes.Buffer
+	suite.setRedirectRequest("unknown1")
+	suite.context.Request = suite.context.Request.WithContext(
+		logging.WithLogger(suite.requestContext(), slog.New(slog.NewJSONHandler(&logs, nil))))
+	suite.mockShortenService.EXPECT().ResolveShortURL(gomock.Any(), "unknown1").Return("", domain.ErrURLNotFound).Times(1)
+
+	suite.shortenerController.Redirect(suite.context)
+
+	suite.Equal(http.StatusNotFound, suite.recorder.Code)
+	suite.Empty(logs.String())
 }

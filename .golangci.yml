@@ -12,7 +12,7 @@ linters:
     - gosec
     - misspell
     - nilerr
-    # revive is turned on in backlog item Q-06, together with the naming cleanup it requires
+    - revive
     - rowserrcheck
     - sqlclosecheck
     - unconvert
@@ -37,6 +37,11 @@ formatters:
   enable:
     - gofmt
     - goimports
+  settings:
+    goimports:
+      # keep this module's imports in their own group after third-party ones
+      local-prefixes:
+        - urlshortener
   exclusions:
     generated: lax
     paths:
