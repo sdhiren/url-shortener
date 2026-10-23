@@ -34,14 +34,14 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
 
 ## P1 — Code quality & structure
 
-- [ ] **Q-01 · Use contexts properly (S)**: use `QueryRowContext` / `ExecContext` and pass `c.Request.Context()` rather than `*gin.Context`. Drop the per-call `Prepare` (unneeded with `$1` params). *(The repository already uses the `*Context` methods since B-06.)*
-- [ ] **Q-02 · Remove dead code (S)**: the unused `Cache` map in the repository, the commented-out repository tests, `// var db` in `main.go`, and the unused `URL` struct tags. *(The `Cache` map and `URL` struct were removed in B-06.)*
+- [x] **Q-01 · Use contexts properly (S)**: done. Handlers pass `c.Request.Context()` to the service; the `*gin.Context` they passed before is never canceled, because gin's `ContextWithFallback` is off. The repository uses the `*Context` database methods (since B-06).
+- [x] **Q-02 · Remove dead code (S)**: done. The `Cache` map, `URL` struct and old repository tests went in B-03/B-06; the leftover `// var db` and `fmt.Println` in `main.go` are gone. `deadcode -test ./...` reports nothing.
 - [x] **Q-03 · Configuration management (S)**: done. `config.Load()` returns a typed `Config` (`PORT`, `BASE_URL`, `APP_MODE`, `DB_*`) with defaults and validation, and reports every invalid setting at once. `APP_MODE` is used instead of `GIN_MODE` because gin panics on a bad `GIN_MODE` before validation runs.
 - [ ] **Q-04 · Idiomatic project layout (M)**: `src/` isn't idiomatic Go. Move to `cmd/server/main.go` + `internal/{handler,service,repository,config,model}`. Split request/response DTOs from the domain model.
-- [ ] **Q-05 · Structured logging (S)**: replace `fmt.Println` with `log/slog` (JSON in prod), add a request-ID middleware, and log errors once at the boundary.
-- [ ] **Q-06 · Naming & formatting (S)**: run `gofmt`/`goimports`, fix the `SaveShotenedURL` typo, use camelCase instead of `snake_case` vars, and rename the `context` param that shadows the package. Then turn on `revive` in `.golangci.yml` (left off in P-06 because of about 20 naming warnings).
+- [x] **Q-05 · Structured logging (S)**: done. `src/logging`: `slog` with JSON in release mode and text otherwise; middleware for request IDs (`X-Request-ID`, reused if valid, otherwise generated) and one log line per request; a request-scoped logger via `logging.FromContext(ctx)`; panics recovered into a logged generic 500. Errors are logged once, in the controller.
+- [x] **Q-06 · Naming & formatting (S)**: done. `revive` is enabled; `goimports` groups `urlshortener/...` imports separately; the `model/request` and `model/response` packages are now named `request` and `response`; and camelCase is used everywhere (`shortUrl` → `shortURL`). The `SaveShotenedURL` typo went in B-05.
 - [x] **Q-07 · Dependency hygiene (S)**: done. Go 1.27.2, Gin 1.12, x/net 0.61, govulncheck clean, stale `vendor/` removed, mocks moved to `go.uber.org/mock` (mockgen pinned as a `go tool`), and `make test/generate/check-generate/vuln` added.
-- [x] **Q-08 · Linting (S)**: done. `.golangci.yml` (golangci-lint v2) with the standard linters plus `gosec`, `errorlint`, `bodyclose`, `sqlclosecheck`, `rowserrcheck`, `misspell`, `nilerr` and `unconvert`; `gofmt`/`goimports` formatters; `make lint`. `revive` is deferred to Q-06.
+- [x] **Q-08 · Linting (S)**: done. `.golangci.yml` (golangci-lint v2) with the standard linters plus `gosec`, `errorlint`, `bodyclose`, `sqlclosecheck`, `rowserrcheck`, `misspell`, `nilerr` and `unconvert`; `gofmt`/`goimports` formatters; `make lint`. `revive` was turned on in Q-06.
 
 ---
 
@@ -100,7 +100,7 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
 2. **Q-07**, then **Q-03** (clean deps + config; this makes everything else easier)
 3. ~~**B-03 → B-04 → B-02**~~ (done: error model, validation, real redirects)
 4. ~~**B-05 + P-05**, **B-06**~~ (done: data integrity)
-5. **Q-01, Q-02, Q-05, Q-06** (cleanup pass), then **Q-04** (layout refactor)
+5. ~~**Q-01, Q-02, Q-05, Q-06**~~ (done: cleanup pass), then **Q-04** (layout refactor)
 6. ~~**D-01**, **Q-08 → P-06**~~ (done), then **T-01 → T-03**
 7. **P-01 → P-04, P-10** (ship-ready)
 8. Features: **F-04 → F-01 → F-02 → F-03 → F-06 → F-05 …**

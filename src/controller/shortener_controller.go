@@ -2,11 +2,12 @@ package controller
 
 import (
 	"errors"
-	"log"
 	"net/http"
-	model "urlshortener/model/request"
-	response "urlshortener/model/response"
+
+	"urlshortener/model/request"
+	"urlshortener/model/response"
 	"urlshortener/src/domain"
+	"urlshortener/src/logging"
 	"urlshortener/src/service"
 
 	"github.com/gin-gonic/gin"
@@ -29,7 +30,7 @@ func NewShortenerController(service service.ShortenService) *ShortenerController
 }
 
 func (sc *ShortenerController) Shorten(c *gin.Context) {
-	var shortenURLRequest model.ShortenURLRequest
+	var shortenURLRequest request.ShortenURLRequest
 	if err := c.ShouldBindJSON(&shortenURLRequest); err != nil {
 		var validationErrs validator.ValidationErrors
 		if errors.As(err, &validationErrs) {
@@ -40,13 +41,14 @@ func (sc *ShortenerController) Shorten(c *gin.Context) {
 		return
 	}
 
-	shortUrl, err := sc.service.Shorten(c, shortenURLRequest)
+	// c.Request.Context() (not c itself) is canceled when the client goes away
+	shortURL, err := sc.service.Shorten(c.Request.Context(), shortenURLRequest)
 	if err != nil {
 		respondWithError(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, response.ShortenURLResponse{ShortURL: shortUrl})
+	c.JSON(http.StatusOK, response.ShortenURLResponse{ShortURL: shortURL})
 }
 
 // Redirect sends the client to the long URL for the short code in the path.
@@ -58,7 +60,7 @@ func (sc *ShortenerController) Redirect(c *gin.Context) {
 	if c.Request.Method == http.MethodHead {
 		resolve = sc.service.LookupShortURL
 	}
-	longURL, err := resolve(c, c.Param("code"))
+	longURL, err := resolve(c.Request.Context(), c.Param("code"))
 	if err != nil {
 		respondWithError(c, err)
 		return
@@ -80,6 +82,6 @@ func respondWithError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, response.ErrorResponse{Error: errURLNotFound})
 		return
 	}
-	log.Printf("%s %s: %v", c.Request.Method, c.Request.URL.Path, err)
+	logging.FromContext(c.Request.Context()).Error("request failed", "error", err)
 	c.JSON(http.StatusInternalServerError, response.ErrorResponse{Error: errInternalServer})
 }
