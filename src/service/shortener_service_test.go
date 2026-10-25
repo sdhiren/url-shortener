@@ -8,6 +8,7 @@ import (
 	"testing"
 	"urlshortener/mocks"
 	model "urlshortener/model/request"
+	response "urlshortener/model/response"
 	"urlshortener/src/domain"
 
 	"github.com/stretchr/testify/assert"
@@ -46,6 +47,11 @@ func (suite *shortenServiceTestSuite) TearDownTest() {
 	suite.mockController.Finish()
 }
 
+// shortened is the expected Shorten result for code under the test host.
+func shortened(code string) response.ShortenURLResponse {
+	return response.ShortenURLResponse{ShortURL: host + code, Code: code}
+}
+
 func (suite *shortenServiceTestSuite) Test_Shorten_ShouldReturnShortURL_WhenCodeIsStoredForThisURL() {
 	// covers both a fresh insert and a URL shortened before; the repository returns longUrl in both cases
 	req := model.ShortenURLRequest{URL: longUrl}
@@ -56,7 +62,7 @@ func (suite *shortenServiceTestSuite) Test_Shorten_ShouldReturnShortURL_WhenCode
 	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
 
 	suite.NoError(err)
-	suite.Equal(host+shortUrl, actualResult)
+	suite.Equal(response.ShortenURLResponse{ShortURL: host + shortUrl, Code: shortUrl}, actualResult)
 }
 
 func (suite *shortenServiceTestSuite) Test_Shorten_ShouldRetryWithSaltedCode_WhenCodeCollidesWithAnotherURL() {
@@ -73,7 +79,7 @@ func (suite *shortenServiceTestSuite) Test_Shorten_ShouldRetryWithSaltedCode_Whe
 	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
 
 	suite.NoError(err)
-	suite.Equal(host+"Salted01", actualResult)
+	suite.Equal(shortened("Salted01"), actualResult)
 }
 
 func (suite *shortenServiceTestSuite) Test_Shorten_ShouldFindSaltedCodeAgain_WhenCollidedURLIsShortenedAgain() {
@@ -91,7 +97,7 @@ func (suite *shortenServiceTestSuite) Test_Shorten_ShouldFindSaltedCodeAgain_Whe
 	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
 
 	suite.NoError(err)
-	suite.Equal(host+"Salted01", actualResult)
+	suite.Equal(shortened("Salted01"), actualResult)
 }
 
 func (suite *shortenServiceTestSuite) Test_Shorten_ShouldReturnError_WhenAllAttemptsCollide() {
@@ -271,7 +277,7 @@ func (suite *shortenServiceTestSuite) Test_Shorten_ShouldUseTrimmedURL_WhenURLHa
 	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
 
 	suite.NoError(err)
-	suite.Equal(host+shortUrl, actualResult)
+	suite.Equal(shortened(shortUrl), actualResult)
 }
 
 func (suite *shortenServiceTestSuite) Test_Shorten_ShouldSkipSelfLinkCheck_WhenHostIsNotAValidURL() {
@@ -284,7 +290,7 @@ func (suite *shortenServiceTestSuite) Test_Shorten_ShouldSkipSelfLinkCheck_WhenH
 	actualResult, err := service.Shorten(suite.context, req)
 
 	suite.NoError(err)
-	suite.Equal("http://[::1"+shortUrl, actualResult)
+	suite.Equal(response.ShortenURLResponse{ShortURL: "http://[::1" + shortUrl, Code: shortUrl}, actualResult)
 }
 
 func (suite *shortenServiceTestSuite) Test_LookupShortURL_ShouldReturnLongURLWithoutRecordingClick() {

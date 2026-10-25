@@ -1,13 +1,16 @@
 package config
 
 import (
+	"bytes"
+	"log"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-var serverEnvKeys = []string{"PORT", "BASE_URL", "APP_MODE"}
+var serverEnvKeys = []string{"PORT", "BASE_URL", "APP_MODE", "REDIRECT_STATUS"}
 
 // setServerEnv sets every server variable, using "" for keys not in env.
 func setServerEnv(t *testing.T, env map[string]string) {
@@ -23,16 +26,16 @@ func TestLoadServerConfig_Defaults(t *testing.T) {
 	cfg, err := LoadServerConfig()
 
 	require.NoError(t, err)
-	assert.Equal(t, ServerConfig{Port: "8080", BaseURL: "http://localhost:8080/", Mode: "release"}, cfg)
+	assert.Equal(t, ServerConfig{Port: "8080", BaseURL: "http://localhost:8080/", Mode: "release", RedirectStatus: 302}, cfg)
 }
 
 func TestLoadServerConfig_WhitespaceOnlyUsesDefaults(t *testing.T) {
-	setServerEnv(t, map[string]string{"PORT": "  ", "BASE_URL": "\t", "APP_MODE": " "})
+	setServerEnv(t, map[string]string{"PORT": "  ", "BASE_URL": "\t", "APP_MODE": " ", "REDIRECT_STATUS": " "})
 
 	cfg, err := LoadServerConfig()
 
 	require.NoError(t, err)
-	assert.Equal(t, ServerConfig{Port: "8080", BaseURL: "http://localhost:8080/", Mode: "release"}, cfg)
+	assert.Equal(t, ServerConfig{Port: "8080", BaseURL: "http://localhost:8080/", Mode: "release", RedirectStatus: 302}, cfg)
 }
 
 func TestLoadServerConfig_DefaultBaseURLFollowsPort(t *testing.T) {
@@ -45,21 +48,64 @@ func TestLoadServerConfig_DefaultBaseURLFollowsPort(t *testing.T) {
 }
 
 func TestLoadServerConfig_AllValuesSet(t *testing.T) {
-	setServerEnv(t, map[string]string{"PORT": "3000", "BASE_URL": "https://sho.rt", "APP_MODE": "debug"})
+	setServerEnv(t, map[string]string{"PORT": "3000", "BASE_URL": "https://sho.rt", "APP_MODE": "debug", "REDIRECT_STATUS": "301"})
 
 	cfg, err := LoadServerConfig()
 
 	require.NoError(t, err)
-	assert.Equal(t, ServerConfig{Port: "3000", BaseURL: "https://sho.rt/", Mode: "debug"}, cfg)
+	assert.Equal(t, ServerConfig{Port: "3000", BaseURL: "https://sho.rt/", Mode: "debug", RedirectStatus: 301}, cfg)
 }
 
 func TestLoadServerConfig_TrimsWhitespace(t *testing.T) {
-	setServerEnv(t, map[string]string{"PORT": " 3000 ", "BASE_URL": " https://sho.rt/ ", "APP_MODE": " test\n"})
+	setServerEnv(t, map[string]string{"PORT": " 3000 ", "BASE_URL": " https://sho.rt/ ", "APP_MODE": " test\n", "REDIRECT_STATUS": " 307 "})
 
 	cfg, err := LoadServerConfig()
 
 	require.NoError(t, err)
-	assert.Equal(t, ServerConfig{Port: "3000", BaseURL: "https://sho.rt/", Mode: "test"}, cfg)
+	assert.Equal(t, ServerConfig{Port: "3000", BaseURL: "https://sho.rt/", Mode: "test", RedirectStatus: 307}, cfg)
+}
+
+func TestLoadServerConfig_RedirectStatus(t *testing.T) {
+	for _, status := range []string{"301", "302", "307", "308"} {
+		t.Run("valid "+status, func(t *testing.T) {
+			setServerEnv(t, map[string]string{"REDIRECT_STATUS": status})
+
+			cfg, err := LoadServerConfig()
+
+			require.NoError(t, err)
+			assert.Equal(t, status, strconv.Itoa(cfg.RedirectStatus))
+		})
+	}
+
+	// an invalid value is not fatal: it logs a warning and falls back to 302
+	for _, status := range []string{"200", "303", "404", "abc", "301.0", "-302"} {
+		t.Run("invalid "+status, func(t *testing.T) {
+			var logs bytes.Buffer
+			original := log.Writer()
+			log.SetOutput(&logs)
+			t.Cleanup(func() { log.SetOutput(original) })
+			setServerEnv(t, map[string]string{"REDIRECT_STATUS": status})
+
+			cfg, err := LoadServerConfig()
+
+			require.NoError(t, err)
+			assert.Equal(t, 302, cfg.RedirectStatus)
+			assert.Contains(t, logs.String(), `invalid REDIRECT_STATUS "`+status+`": must be one of 301, 302, 307, 308; using 302`)
+		})
+	}
+}
+
+func TestLoadServerConfig_RejectsBaseURLPathReservedForLookupAPI(t *testing.T) {
+	for _, baseURL := range []string{"https://sho.rt/url/", "https://sho.rt/url"} {
+		t.Run(baseURL, func(t *testing.T) {
+			setServerEnv(t, map[string]string{"BASE_URL": baseURL})
+
+			cfg, err := LoadServerConfig()
+
+			assert.EqualError(t, err, `invalid BASE_URL "`+baseURL+`": the path /url/ is reserved for the lookup API`)
+			assert.Equal(t, ServerConfig{}, cfg)
+		})
+	}
 }
 
 func TestLoadServerConfig_Mode(t *testing.T) {
@@ -228,7 +274,7 @@ func TestLoad_Success(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, Config{
-		Server: ServerConfig{Port: "3000", BaseURL: "https://sho.rt/", Mode: "release"},
+		Server: ServerConfig{Port: "3000", BaseURL: "https://sho.rt/", Mode: "release", RedirectStatus: 302},
 		DB:     DBConfig{User: "user", Password: "secret", Host: "db", Port: "5432", Name: "main", SSLMode: "disable"},
 	}, cfg)
 }

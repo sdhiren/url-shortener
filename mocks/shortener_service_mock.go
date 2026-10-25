@@ -13,6 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 	model "urlshortener/model/request"
+	model0 "urlshortener/model/response"
 
 	gomock "go.uber.org/mock/gomock"
 )
@@ -72,16 +73,16 @@ func (mr *MockShortenServiceMockRecorder) ResolveShortURL(ctx, code any) *gomock
 }
 
 // Shorten mocks base method.
-func (m *MockShortenService) Shorten(arg0 context.Context, req model.ShortenURLRequest) (string, error) {
+func (m *MockShortenService) Shorten(ctx context.Context, req model.ShortenURLRequest) (model0.ShortenURLResponse, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Shorten", arg0, req)
-	ret0, _ := ret[0].(string)
+	ret := m.ctrl.Call(m, "Shorten", ctx, req)
+	ret0, _ := ret[0].(model0.ShortenURLResponse)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Shorten indicates an expected call of Shorten.
-func (mr *MockShortenServiceMockRecorder) Shorten(arg0, req any) *gomock.Call {
+func (mr *MockShortenServiceMockRecorder) Shorten(ctx, req any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Shorten", reflect.TypeOf((*MockShortenService)(nil).Shorten), arg0, req)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Shorten", reflect.TypeOf((*MockShortenService)(nil).Shorten), ctx, req)
 }

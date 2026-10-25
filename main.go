@@ -35,8 +35,8 @@ func main() {
 		log.Fatal("Error pinging the database:", err)
 	}
 
-	r := router.InitRouter(db, cfg.Server.BaseURL)
-	log.Printf("listening on %s, short links use %s", cfg.Server.Addr(), cfg.Server.BaseURL)
+	r := router.InitRouter(db, cfg.Server.BaseURL, cfg.Server.RedirectStatus)
+	log.Printf("listening on %s, short links use %s and redirect with %d", cfg.Server.Addr(), cfg.Server.BaseURL, cfg.Server.RedirectStatus)
 	if err := r.Run(cfg.Server.Addr()); err != nil {
 		log.Fatal("Server stopped: ", err)
 	}
