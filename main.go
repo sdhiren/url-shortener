@@ -45,7 +45,12 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("connecting to database: %w", err)
 	}
 
-	r := router.InitRouter(db, cfg.Server.BaseURL, logger)
-	logger.Info("listening", "addr", cfg.Server.Addr(), "base_url", cfg.Server.BaseURL, "mode", cfg.Server.Mode)
+	r := router.InitRouter(db, cfg.Server.BaseURL, cfg.Server.RedirectStatus, logger)
+	logger.Info("listening",
+		"addr", cfg.Server.Addr(),
+		"base_url", cfg.Server.BaseURL,
+		"redirect_status", cfg.Server.RedirectStatus,
+		"mode", cfg.Server.Mode,
+	)
 	return r.Run(cfg.Server.Addr())
 }

@@ -20,7 +20,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func InitRouter(db *sql.DB, baseURL string, logger *slog.Logger) *gin.Engine {
+// InitRouter wires up the API. redirectStatus is the status code short links
+// redirect with; 0 means 302 Found. Every request is logged with logger.
+func InitRouter(db *sql.DB, baseURL string, redirectStatus int, logger *slog.Logger) *gin.Engine {
 	r := gin.New()
 	// the logging middleware runs first, so a recovered panic is still logged
 	// with its request ID and the request line shows the 500
@@ -30,9 +32,11 @@ func InitRouter(db *sql.DB, baseURL string, logger *slog.Logger) *gin.Engine {
 	util := util.NewUtil()
 
 	shortenerService := service.NewShortenerService(baseURL, repository, util)
-	shortenerController := controller.NewShortenerController(shortenerService)
+	shortenerController := controller.NewShortenerController(shortenerService, redirectStatus)
 
 	r.POST("/shorten", shortenerController.Shorten)
+	// config rejects a BASE_URL with path /url/, which would clash with this route
+	r.GET("/url/:code", shortenerController.Lookup)
 	// short links are BASE_URL + code, so serve them under BASE_URL's path
 	links := r.Group(basePath(baseURL))
 	links.GET("/:code", shortenerController.Redirect)

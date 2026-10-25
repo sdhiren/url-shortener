@@ -259,6 +259,48 @@ func TestValidateLongURL_NoSelfLinkCheckWithoutBase(t *testing.T) {
 	}
 }
 
+func TestCheckLongURL_RejectsWithSameReasonAsShorten(t *testing.T) {
+	tests := []struct {
+		name   string
+		raw    string
+		reason string
+	}{
+		{"empty", "", reasonRequired},
+		{"not a url", "not a url", reasonWhitespace},
+		{"no scheme", "www.test.com", reasonScheme},
+		{"javascript", "javascript:alert(1)", reasonScheme},
+		{"data", "data:text/html,<script>alert(1)</script>", reasonScheme},
+		{"ftp", "ftp://example.com", reasonScheme},
+		{"mailto", "mailto:a@b.c", reasonScheme},
+		{"no host", "http://", reasonHost},
+		{"too long", urlOfLength(MaxURLLength+1, "a"), reasonTooLong},
+		{"credentials", "https://user:pass@example.com", reasonCredentials},
+		{"bad port", "https://example.com:0", reasonPort},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertInvalid(t, CheckLongURL(tt.raw), tt.reason)
+		})
+	}
+}
+
+func TestCheckLongURL_LeavesContextDependentRulesToShorten(t *testing.T) {
+	// self links need the base URL and host rules run after the self-link check,
+	// so both are only enforced by Shorten
+	for _, raw := range []string{
+		"https://example.com/a?b=c",
+		"HTTP://EXAMPLE.COM",
+		"  https://example.com  ",
+		"http://localhost:8080/abc123",
+		"http://127.0.0.1",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			assert.NoError(t, CheckLongURL(raw))
+		})
+	}
+}
+
 func TestIsValidLabel(t *testing.T) {
 	tests := []struct {
 		label string

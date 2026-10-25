@@ -3,7 +3,9 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"strconv"
@@ -15,6 +17,8 @@ const (
 	defaultMode      = "release"
 	defaultDBPort    = "5432"
 	defaultDBSSLMode = "disable"
+	// must match the lookup route in the router package
+	reservedLookupPath = "/url/"
 )
 
 var validModes = map[string]bool{
@@ -37,10 +41,18 @@ type Config struct {
 	DB     DBConfig
 }
 
+var validRedirectStatuses = map[int]bool{
+	http.StatusMovedPermanently:  true,
+	http.StatusFound:             true,
+	http.StatusTemporaryRedirect: true,
+	http.StatusPermanentRedirect: true,
+}
+
 type ServerConfig struct {
-	Port    string
-	BaseURL string // always ends with "/"
-	Mode    string // gin mode: debug, release or test
+	Port           string
+	BaseURL        string // always ends with "/"
+	Mode           string // gin mode: debug, release or test
+	RedirectStatus int    // status code for short link redirects: 301, 302, 307 or 308
 }
 
 // Load reads the full application config from the environment and reports
@@ -55,14 +67,15 @@ func Load() (Config, error) {
 }
 
 // LoadServerConfig reads the HTTP server settings from the environment. All are optional:
-// PORT defaults to 8080, APP_MODE to release and BASE_URL to http://localhost:<PORT>/.
-// APP_MODE is used instead of GIN_MODE because gin panics on an invalid GIN_MODE
-// during package init, before this validation could report it.
+// PORT defaults to 8080, APP_MODE to release, BASE_URL to http://localhost:<PORT>/ and
+// REDIRECT_STATUS to 302. APP_MODE is used instead of GIN_MODE because gin panics on
+// an invalid GIN_MODE during package init, before this validation could report it.
 func LoadServerConfig() (ServerConfig, error) {
 	cfg := ServerConfig{
-		Port:    strings.TrimSpace(os.Getenv("PORT")),
-		BaseURL: strings.TrimSpace(os.Getenv("BASE_URL")),
-		Mode:    strings.TrimSpace(os.Getenv("APP_MODE")),
+		Port:           strings.TrimSpace(os.Getenv("PORT")),
+		BaseURL:        strings.TrimSpace(os.Getenv("BASE_URL")),
+		Mode:           strings.TrimSpace(os.Getenv("APP_MODE")),
+		RedirectStatus: redirectStatus(strings.TrimSpace(os.Getenv("REDIRECT_STATUS"))),
 	}
 
 	if cfg.Port == "" {
@@ -98,6 +111,21 @@ func LoadServerConfig() (ServerConfig, error) {
 	return cfg, nil
 }
 
+// redirectStatus parses REDIRECT_STATUS. Unlike other settings, an invalid value
+// doesn't stop the service: it logs a warning and uses the safe default, 302.
+func redirectStatus(value string) int {
+	if value == "" {
+		return http.StatusFound
+	}
+	status, err := strconv.Atoi(value)
+	if err != nil || !validRedirectStatuses[status] {
+		// slog stores value as an escaped attribute, so it can't forge log lines
+		slog.Warn("invalid REDIRECT_STATUS, using 302", "value", value, "allowed", "301, 302, 307, 308")
+		return http.StatusFound
+	}
+	return status
+}
+
 // Addr is the listen address for the HTTP server, e.g. ":8080".
 func (s ServerConfig) Addr() string {
 	return ":" + s.Port
@@ -121,6 +149,10 @@ func normalizeBaseURL(raw string) (string, error) {
 		if u.RawPath != "" {
 			u.RawPath += "/"
 		}
+	}
+	// short links are served under BASE_URL's path, which would clash with GET /url/:code
+	if u.Path == reservedLookupPath {
+		return "", fmt.Errorf("invalid BASE_URL %q: the path %s is reserved for the lookup API", raw, reservedLookupPath)
 	}
 	return u.String(), nil
 }

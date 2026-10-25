@@ -26,6 +26,11 @@ const recordClickQuery = "UPDATE URLS SET CLICK_COUNT = CLICK_COUNT + 1 WHERE SH
 // sqlmock, and fails the test if an expected query isn't run or an unexpected one is.
 func newTestRouter(t *testing.T, baseURL string) (*gin.Engine, sqlmock.Sqlmock) {
 	t.Helper()
+	return newTestRouterWithRedirectStatus(t, baseURL, 0)
+}
+
+func newTestRouterWithRedirectStatus(t *testing.T, baseURL string, redirectStatus int) (*gin.Engine, sqlmock.Sqlmock) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
 	require.NoError(t, err)
@@ -33,7 +38,7 @@ func newTestRouter(t *testing.T, baseURL string) (*gin.Engine, sqlmock.Sqlmock) 
 		assert.NoError(t, mock.ExpectationsWereMet())
 		db.Close()
 	})
-	return InitRouter(db, baseURL, discardLogger()), mock
+	return InitRouter(db, baseURL, redirectStatus, discardLogger()), mock
 }
 
 func discardLogger() *slog.Logger {
@@ -61,16 +66,16 @@ func TestInitRouter_RegistersRoutes(t *testing.T) {
 		baseURL string
 		want    []string
 	}{
-		{"https://sho.rt/", []string{"POST /shorten", "GET /:code", "HEAD /:code"}},
-		{"https://example.com/s/", []string{"POST /shorten", "GET /s/:code", "HEAD /s/:code"}},
-		{"https://example.com/a/b/", []string{"POST /shorten", "GET /a/b/:code", "HEAD /a/b/:code"}},
+		{"https://sho.rt/", []string{"POST /shorten", "GET /url/:code", "GET /:code", "HEAD /:code"}},
+		{"https://example.com/s/", []string{"POST /shorten", "GET /url/:code", "GET /s/:code", "HEAD /s/:code"}},
+		{"https://example.com/a/b/", []string{"POST /shorten", "GET /url/:code", "GET /a/b/:code", "HEAD /a/b/:code"}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.baseURL, func(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 
-			r := InitRouter(&sql.DB{}, tt.baseURL, discardLogger())
+			r := InitRouter(&sql.DB{}, tt.baseURL, 0, discardLogger())
 
 			assert.ElementsMatch(t, tt.want, routesOf(r))
 		})
@@ -197,8 +202,8 @@ func TestShorten_ReturnsShortURLUnderBaseURL(t *testing.T) {
 
 	recorder := serve(r, http.MethodPost, "/shorten", `{"url": "https://example.com/a"}`)
 
-	assert.Equal(t, http.StatusOK, recorder.Code)
-	assert.JSONEq(t, `{"short_url": "https://example.com/s/`+code+`"}`, recorder.Body.String())
+	assert.Equal(t, http.StatusCreated, recorder.Code)
+	assert.JSONEq(t, `{"short_url": "https://example.com/s/`+code+`", "code": "`+code+`"}`, recorder.Body.String())
 }
 
 func TestShorten_ExistingURLReturnsSameCodeWithoutNewRowOrClick(t *testing.T) {
@@ -211,8 +216,8 @@ func TestShorten_ExistingURLReturnsSameCodeWithoutNewRowOrClick(t *testing.T) {
 
 	recorder := serve(r, http.MethodPost, "/shorten", `{"url": "https://example.com/a"}`)
 
-	assert.Equal(t, http.StatusOK, recorder.Code)
-	assert.JSONEq(t, `{"short_url": "https://sho.rt/`+code+`"}`, recorder.Body.String())
+	assert.Equal(t, http.StatusCreated, recorder.Code)
+	assert.JSONEq(t, `{"short_url": "https://sho.rt/`+code+`", "code": "`+code+`"}`, recorder.Body.String())
 }
 
 func TestShorten_CollisionGetsDifferentCode(t *testing.T) {
@@ -227,8 +232,8 @@ func TestShorten_CollisionGetsDifferentCode(t *testing.T) {
 
 	recorder := serve(r, http.MethodPost, "/shorten", `{"url": "https://example.com/a"}`)
 
-	assert.Equal(t, http.StatusOK, recorder.Code)
-	assert.JSONEq(t, `{"short_url": "https://sho.rt/`+saltedCode+`"}`, recorder.Body.String())
+	assert.Equal(t, http.StatusCreated, recorder.Code)
+	assert.JSONEq(t, `{"short_url": "https://sho.rt/`+saltedCode+`", "code": "`+saltedCode+`"}`, recorder.Body.String())
 }
 
 func TestShorten_DatabaseErrorReturnsInternalServerError(t *testing.T) {
@@ -241,10 +246,99 @@ func TestShorten_DatabaseErrorReturnsInternalServerError(t *testing.T) {
 	assert.JSONEq(t, `{"error": "internal server error"}`, recorder.Body.String())
 }
 
+func TestShorten_InvalidInputReturnsBadRequestWithoutQuerying(t *testing.T) {
+	// sqlmock fails the test if any query runs, so nothing reaches the database
+	r, _ := newTestRouter(t, "https://sho.rt/")
+	bodies := map[string]string{
+		"empty object":   `{}`,
+		"not a url":      `{"url": "not a url"}`,
+		"no scheme":      `{"url": "www.test.com"}`,
+		"javascript":     `{"url": "javascript:alert(1)"}`,
+		"ftp":            `{"url": "ftp://example.com"}`,
+		"too long":       `{"url": "https://example.com/` + strings.Repeat("a", 981) + `"}`,
+		"malformed json": `{"url": "https://example.com"`,
+		"private ip":     `{"url": "http://127.0.0.1"}`,
+		"self link":      `{"url": "https://sho.rt/Lc4KTFBE"}`,
+	}
+
+	for name, body := range bodies {
+		t.Run(name, func(t *testing.T) {
+			recorder := serve(r, http.MethodPost, "/shorten", body)
+
+			assert.Equal(t, http.StatusBadRequest, recorder.Code)
+			assert.Equal(t, "application/json; charset=utf-8", recorder.Header().Get("Content-Type"))
+			assert.Contains(t, recorder.Body.String(), `"error":`)
+		})
+	}
+}
+
+func TestRedirect_UsesConfiguredRedirectStatus(t *testing.T) {
+	r, mock := newTestRouterWithRedirectStatus(t, "https://sho.rt/", http.StatusMovedPermanently)
+	mock.ExpectQuery(recordClickQuery).WithArgs("Lc4KTFBE").
+		WillReturnRows(sqlmock.NewRows([]string{"long_url"}).AddRow("https://example.com/a"))
+
+	recorder := serve(r, http.MethodGet, "/Lc4KTFBE", "")
+
+	assert.Equal(t, http.StatusMovedPermanently, recorder.Code)
+	assert.Equal(t, "https://example.com/a", recorder.Header().Get("Location"))
+}
+
+func TestLookup_ReturnsLongURLWithoutRecordingClick(t *testing.T) {
+	// only the SELECT is expected; sqlmock fails the test if the click UPDATE runs
+	r, mock := newTestRouter(t, "https://sho.rt/")
+	mock.ExpectQuery(getLongURLQuery).WithArgs("Lc4KTFBE").
+		WillReturnRows(sqlmock.NewRows([]string{"long_url"}).AddRow("https://example.com/a"))
+
+	recorder := serve(r, http.MethodGet, "/url/Lc4KTFBE", "")
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.JSONEq(t, `{"code": "Lc4KTFBE", "long_url": "https://example.com/a"}`, recorder.Body.String())
+	assert.Empty(t, recorder.Header().Get("Location"))
+}
+
+func TestLookup_ServedAtRoot_WhenBaseURLHasPath(t *testing.T) {
+	r, mock := newTestRouter(t, "https://example.com/s/")
+	mock.ExpectQuery(getLongURLQuery).WithArgs("Lc4KTFBE").
+		WillReturnRows(sqlmock.NewRows([]string{"long_url"}).AddRow("https://example.com/a"))
+
+	recorder := serve(r, http.MethodGet, "/url/Lc4KTFBE", "")
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+}
+
+func TestLookup_UnknownCodeReturnsNotFound(t *testing.T) {
+	r, mock := newTestRouter(t, "https://sho.rt/")
+	mock.ExpectQuery(getLongURLQuery).WithArgs("unknown1").WillReturnRows(sqlmock.NewRows([]string{"long_url"}))
+
+	recorder := serve(r, http.MethodGet, "/url/unknown1", "")
+
+	assert.Equal(t, http.StatusNotFound, recorder.Code)
+	assert.Equal(t, "application/json; charset=utf-8", recorder.Header().Get("Content-Type"))
+	assert.JSONEq(t, `{"error": "short url not found"}`, recorder.Body.String())
+}
+
+func TestLookup_MalformedCodeReturnsNotFoundWithoutQuerying(t *testing.T) {
+	r, _ := newTestRouter(t, "https://sho.rt/")
+
+	recorder := serve(r, http.MethodGet, "/url/"+strings.Repeat("x", 21), "")
+
+	assert.Equal(t, http.StatusNotFound, recorder.Code)
+}
+
+func TestLookup_DatabaseErrorReturnsInternalServerError(t *testing.T) {
+	r, mock := newTestRouter(t, "https://sho.rt/")
+	mock.ExpectQuery(getLongURLQuery).WithArgs("Lc4KTFBE").WillReturnError(sql.ErrConnDone)
+
+	recorder := serve(r, http.MethodGet, "/url/Lc4KTFBE", "")
+
+	assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+	assert.JSONEq(t, `{"error": "internal server error"}`, recorder.Body.String())
+}
+
 func TestRouter_UnknownRouteReturnsNotFound(t *testing.T) {
 	r, _ := newTestRouter(t, "https://sho.rt/")
 
-	for _, path := range []string{"/a/b", "/url/Lc4KTFBE"} {
+	for _, path := range []string{"/a/b", "/url/a/b"} {
 		t.Run(path, func(t *testing.T) {
 			assert.Equal(t, http.StatusNotFound, serve(r, http.MethodGet, path, "").Code)
 		})
@@ -259,7 +353,7 @@ func TestInitRouter_LogsRequestsWithRequestID(t *testing.T) {
 	defer db.Close()
 	mock.ExpectQuery(recordClickQuery).WithArgs("Lc4KTFBE").
 		WillReturnRows(sqlmock.NewRows([]string{"long_url"}).AddRow("https://example.com/a"))
-	r := InitRouter(db, "https://sho.rt/", slog.New(slog.NewJSONHandler(&logs, nil)))
+	r := InitRouter(db, "https://sho.rt/", 0, slog.New(slog.NewJSONHandler(&logs, nil)))
 
 	recorder := serve(r, http.MethodGet, "/Lc4KTFBE", "")
 
