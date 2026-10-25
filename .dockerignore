@@ -1,0 +1,21 @@
+# Keep the build context to what `go build` needs.
+
+# Local secrets: must never end up in an image layer
+.env
+.env.*
+.envrc
+
+.git
+.gitignore
+.github
+
+# only imported by *_test.go
+mocks/
+# not tracked; the image downloads modules from go.mod/go.sum instead
+vendor/
+
+# used by compose and Liquibase (mounted as a volume), not by the image
+Makefile
+docker-compose.yaml
+infrastructure/
+coverage*.out

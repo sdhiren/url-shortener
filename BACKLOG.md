@@ -17,6 +17,7 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
   - Move secrets to an untracked `.env` file, commit a `.env.example`, and add `.env` / `.envrc` to `.gitignore`.
   - Drop the `login` target (or read creds from env / `docker login` interactively). The image used is `postgres` from Docker Hub, so the Oracle login may not be needed at all.
   - Optional: purge history with `git filter-repo`.
+  - Done: `.dockerignore` keeps `.env`, `.envrc`, `.git`, `mocks/` and `vendor/` out of the image (`Dockerfile` runs `COPY . /app`).
 
 - [x] **B-02 · Redirect endpoint doesn't redirect (S)**: done. `GET /:code` (under `BASE_URL`'s path) returns `302` with `Location` and `Cache-Control: no-store`; `HEAD` gets the same redirect without counting a click. Malformed codes return 404 without querying the DB. The old JSON `GET /url/:code` is removed; a JSON lookup returns in F-04.
 
@@ -62,13 +63,13 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
 
 - [ ] **P-01 · Graceful shutdown & server timeouts (S)**: use `http.Server` with Read/Write/Idle timeouts and `signal.NotifyContext` + `Shutdown`. Configure the DB pool (`SetMaxOpenConns`, `SetConnMaxLifetime`).
 - [ ] **P-02 · Health endpoints (S)**: `/healthz` (liveness) and `/readyz` (pings the DB). Wire them into the compose healthcheck.
-- [ ] **P-03 · Production Dockerfile (S)**: multi-stage build, a static binary with `CGO_ENABLED=0`, a `distroless`/`scratch` runtime, a non-root user, a `.dockerignore`, and pinned base image versions.
+- [ ] **P-03 · Production Dockerfile (S)**: multi-stage build, a static binary with `CGO_ENABLED=0`, a `distroless`/`scratch` runtime, a non-root user, and pinned base image versions. *(The `.dockerignore` was added in B-01.)*
 - [ ] **P-04 · Compose fixes (S)**: the API should wait for Liquibase (`condition: service_completed_successfully`). Pin `postgres` and `liquibase` versions, drop the obsolete `version:` key, and don't publish the DB port by default. *(Partly done in P-06: the API now waits for Liquibase to finish, and Liquibase gets its credentials as arguments, since Liquibase Community 4.9 ignores `LIQUIBASE_COMMAND_*` env vars, so B-01 had silently broken migrations.)*
 - [x] **P-05 · Migrations (S)**: done in migration 003: duplicates merged, unique constraint on `SHORT_URL`, and a `CREATED_AT` column. Decided against the rest: no `LONG_URL` index (nothing queries by long URL any more, and a btree index fails on long multi-byte URLs); `EXPIRES_AT` belongs to F-02; and changeset 001's `author` can't be changed, because Liquibase would treat it as a new changeset. Replacing Liquibase is still optional.
 - [x] **P-06 · CI pipeline with GitHub Actions (M)**: done. `.github/workflows/ci.yml` runs on PRs and on pushes to `main`, with Go from `go.mod`, caching, concurrency cancelling and read-only permissions:
   - **Lint:** `make tidy-check`, `make check-generate`, `go vet`, golangci-lint v2.14.0.
   - **Test:** `make coverage` (race detector, 80% gate), coverage table in the run summary, report uploaded as an artifact.
-  - **Security:** `govulncheck` and gitleaks. `.gitleaks.toml` adds rules for plain passwords in config files and `docker login -p`, which the default rules missed. The pre-B-01 leaks are listed in `.gitleaksignore`.
+  - **Security:** `govulncheck` and gitleaks. `.gitleaks.toml` adds rules for plain passwords in config files and registry passwords passed to `docker login` on the command line, which the default rules missed. The pre-B-01 leaks are listed in `.gitleaksignore`.
   - **Docker image:** built on every run; on `main`, pushed to `ghcr.io/sdhiren/url-shortener` (`sha-<commit>` and `latest`).
   - **Dependabot** for Go modules, GitHub Actions and the Docker base image, and a CI badge in the README.
   - Still to do: an integration job with a Postgres service container once T-01/T-03 exist, and adding the CI jobs as required status checks in the `protect_main` ruleset.
