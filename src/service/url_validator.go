@@ -36,38 +36,22 @@ func invalid(reason string) error {
 	return &domain.InvalidURLError{Reason: reason}
 }
 
+// CheckLongURL runs the validation steps that don't depend on the shortener's own
+// URL: required, length, characters, http(s) scheme, host, credentials and port.
+// Callers use it to reject bad input before calling Shorten, which repeats these
+// checks and adds the rest. It returns a *domain.InvalidURLError on failure.
+func CheckLongURL(raw string) error {
+	_, _, err := parseLongURL(raw)
+	return err
+}
+
 // validateLongURL checks that raw is a shareable absolute http(s) URL and returns it
 // with surrounding whitespace removed. base is the shortener's own public URL, used
 // to reject links back to the shortener (which could create redirect loops); it may be nil.
 func validateLongURL(raw string, base *url.URL) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", invalid(reasonRequired)
-	}
-	if utf8.RuneCountInString(raw) > MaxURLLength {
-		return "", invalid(reasonTooLong)
-	}
-	if strings.ContainsFunc(raw, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
-		return "", invalid(reasonWhitespace)
-	}
-
-	u, err := url.Parse(raw)
+	raw, u, err := parseLongURL(raw)
 	if err != nil {
-		return "", invalid(reasonMalformed)
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", invalid(reasonScheme)
-	}
-	if u.Opaque != "" || u.Host == "" || u.Hostname() == "" {
-		return "", invalid(reasonHost)
-	}
-	if u.User != nil {
-		return "", invalid(reasonCredentials)
-	}
-	if port := u.Port(); port != "" {
-		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
-			return "", invalid(reasonPort)
-		}
+		return "", err
 	}
 	if isSelfLink(u, base) {
 		return "", invalid(reasonSelfLink)
@@ -77,6 +61,41 @@ func validateLongURL(raw string, base *url.URL) (string, error) {
 	}
 
 	return raw, nil
+}
+
+// parseLongURL trims raw and runs the checks shared by CheckLongURL and validateLongURL,
+// returning the trimmed URL and its parsed form.
+func parseLongURL(raw string) (string, *url.URL, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil, invalid(reasonRequired)
+	}
+	if utf8.RuneCountInString(raw) > MaxURLLength {
+		return "", nil, invalid(reasonTooLong)
+	}
+	if strings.ContainsFunc(raw, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
+		return "", nil, invalid(reasonWhitespace)
+	}
+
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", nil, invalid(reasonMalformed)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", nil, invalid(reasonScheme)
+	}
+	if u.Opaque != "" || u.Host == "" || u.Hostname() == "" {
+		return "", nil, invalid(reasonHost)
+	}
+	if u.User != nil {
+		return "", nil, invalid(reasonCredentials)
+	}
+	if port := u.Port(); port != "" {
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			return "", nil, invalid(reasonPort)
+		}
+	}
+	return raw, u, nil
 }
 
 func validateHost(host string) error {

@@ -20,7 +20,8 @@ You send it a long URL and it gives you a short link; opening the short link red
 ## Features
 
 - Shorten any public `http`/`https` URL to an 8-character code.
-- Short links redirect with `302 Found` and count every click atomically, so no clicks are lost under concurrent traffic.
+- Short links redirect with `302 Found` (configurable) and count every click atomically, so no clicks are lost under concurrent traffic.
+- A JSON lookup API (`GET /url/:code`) returns a short link's target without counting a click.
 - The same long URL always returns the same short code, even under concurrent requests (one row per URL).
 - Hash collisions are detected and resolved, so a short link can never be taken over by a different URL (see [How short codes work](#how-short-codes-work)).
 - Strict URL validation, with a clear reason when a URL is rejected (see [URL validation rules](#url-validation-rules)).
@@ -89,7 +90,7 @@ curl -s -X POST http://localhost:8080/shorten -H 'Content-Type: application/json
 ```
 
 ```json
-{"short_url":"http://localhost:8080/Xy12Ab34"}
+{"short_url":"http://localhost:8080/Xy12Ab34","code":"Xy12Ab34"}
 ```
 
 Open the short link (in a browser, or with `curl -i` to see the redirect):
@@ -104,6 +105,16 @@ Cache-Control: no-store
 Location: https://example.com/some/long/path
 ```
 
+Look up where a short link points, without following it or counting a click:
+
+```bash
+curl -s http://localhost:8080/url/Xy12Ab34
+```
+
+```json
+{"code":"Xy12Ab34","long_url":"https://example.com/some/long/path"}
+```
+
 Stop everything with `make stop`, or `make stopv` to also delete the database volume.
 
 ## Configuration
@@ -113,8 +124,9 @@ All configuration comes from environment variables. With Docker Compose they are
 | Variable | Required | Default | Allowed values |
 |---|---|---|---|
 | `PORT` | no | `8080` | 1–65535 |
-| `BASE_URL` | no | `http://localhost:<PORT>/` | absolute `http`/`https` URL, no credentials, query or fragment; a trailing `/` is added if missing |
+| `BASE_URL` | no | `http://localhost:<PORT>/` | absolute `http`/`https` URL, no credentials, query or fragment, path not `/url/`; a trailing `/` is added if missing |
 | `APP_MODE` | no | `release` | `debug`, `release`, `test` |
+| `REDIRECT_STATUS` | no | `302` | `301`, `302`, `307`, `308`; any other value logs a warning and uses `302` |
 | `DB_USER` | yes | | |
 | `DB_PASSWORD` | yes | | wrap in single quotes in `.env` if it contains `$` |
 | `DB_HOST` | yes | | `db` inside Docker Compose, `localhost` when running the API on your machine |
@@ -122,7 +134,9 @@ All configuration comes from environment variables. With Docker Compose they are
 | `DB_NAME` | yes | | |
 | `DB_SSLMODE` | no | `disable` | `disable`, `allow`, `prefer`, `require`, `verify-ca`, `verify-full` |
 
-`BASE_URL` is the public address of the service. Short links are built by appending the code to it, and the redirect route is served under its path, so in production set it to your real domain, e.g. `https://sho.rt/`.
+`BASE_URL` is the public address of the service. Short links are built by appending the code to it, and the redirect route is served under its path, so in production set it to your real domain, e.g. `https://sho.rt/`. Its path can't be `/url/`, because that is where the lookup API lives.
+
+`REDIRECT_STATUS` is the status code short links redirect with. Keep the default `302` unless you have a reason not to: browsers cache permanent redirects (`301`, `308`) and stop asking the server, so repeat clicks from the same browser are no longer counted, and changing or deleting a link won't reach them.
 
 `APP_MODE` sets Gin's mode. It's used instead of Gin's own `GIN_MODE`, because Gin crashes on an invalid `GIN_MODE` before the service can validate it.
 
@@ -152,11 +166,15 @@ Creates a short URL, or returns the existing one if this long URL was shortened 
 
 | Status | Body | When |
 |---|---|---|
-| `200` | `{"short_url": "http://localhost:8080/Xy12Ab34"}` | Shortened, or already existed |
+| `201` | `{"short_url": "http://localhost:8080/Xy12Ab34", "code": "Xy12Ab34"}` | Shortened, or already existed (the existing code is returned) |
 | `400` | `{"error": "url is required"}` | `url` is missing or empty |
 | `400` | `{"error": "request body must be JSON like {\"url\": \"https://example.com\"}"}` | Body is not valid JSON, or `url` is not a string |
 | `400` | `{"error": "invalid url: <reason>"}` | URL fails validation (see below) |
 | `500` | `{"error": "internal server error"}` | Unexpected error, e.g. the database is down; details are in the server log |
+
+```bash
+curl -i -X POST http://localhost:8080/shorten -H 'Content-Type: application/json' -d '{"url": "https://example.com"}'
+```
 
 ### `GET /:code`
 
@@ -168,17 +186,31 @@ curl -i http://localhost:8080/Xy12Ab34
 
 | Status | Headers / body | When |
 |---|---|---|
-| `302` | `Location: <long url>`, `Cache-Control: no-store` | Code exists; the click is counted |
+| `302` | `Location: <long url>`, `Cache-Control: no-store` | Code exists; the click is counted. The status is `REDIRECT_STATUS` if set |
 | `404` | `{"error": "short url not found"}` | Unknown code, or a code that can't exist (not 1–20 characters of `A–Z a–z 0–9 - _`) |
 | `500` | `{"error": "internal server error"}` | Unexpected error |
 
-- It's a `302`, not a `301`: browsers cache `301` redirects and stop asking the server, so later clicks would never be counted. `Cache-Control: no-store` has the same purpose.
+- It's a `302`, not a `301`, by default: browsers cache `301` redirects and stop asking the server, so later clicks would never be counted. `Cache-Control: no-store` has the same purpose. Set `REDIRECT_STATUS=301` to opt in anyway.
 - Non-ASCII characters in the long URL are percent-encoded in `Location`, as HTTP requires; browsers decode them back.
 - Each click is counted with a single atomic `UPDATE … SET CLICK_COUNT = CLICK_COUNT + 1`, so concurrent clicks are never lost.
 
 ### `HEAD /:code`
 
 Same status and `Location` as `GET`, but **doesn't count a click**, so link checkers and preview bots don't inflate the numbers.
+
+### `GET /url/:code`
+
+Returns where a short link points as JSON, without redirecting or counting a click. Unlike the redirect, this API route is always at the root, whatever the path of `BASE_URL`.
+
+```bash
+curl -s http://localhost:8080/url/Xy12Ab34
+```
+
+| Status | Body | When |
+|---|---|---|
+| `200` | `{"code": "Xy12Ab34", "long_url": "https://example.com/some/long/path"}` | Code exists |
+| `404` | `{"error": "short url not found"}` | Unknown code, or a code that can't exist |
+| `500` | `{"error": "internal server error"}` | Unexpected error |
 
 ### URL validation rules
 

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	model "urlshortener/model/request"
+	response "urlshortener/model/response"
 	"urlshortener/src/domain"
 	"urlshortener/src/repository"
 	"urlshortener/src/util"
@@ -16,7 +17,9 @@ import (
 //go:generate go tool mockgen -source=shortener_service.go -destination=../../mocks/shortener_service_mock.go -package=mocks
 
 type ShortenService interface {
-	Shorten(context context.Context, req model.ShortenURLRequest) (string, error)
+	// Shorten validates req.URL and returns its short link and code, creating them
+	// unless this URL was shortened before. Invalid URLs return a *domain.InvalidURLError.
+	Shorten(ctx context.Context, req model.ShortenURLRequest) (response.ShortenURLResponse, error)
 	// ResolveShortURL records a click on code and returns its long URL, or
 	// domain.ErrURLNotFound if the code is malformed or unknown.
 	ResolveShortURL(ctx context.Context, code string) (string, error)
@@ -50,25 +53,25 @@ func NewShortenerService(host string, repo repository.ShortenerRepository, util 
 	return &shortenService{host: host, baseURL: baseURL, repo: repo, util: util}
 }
 
-func (ss *shortenService) Shorten(ctx context.Context, req model.ShortenURLRequest) (string, error) {
+func (ss *shortenService) Shorten(ctx context.Context, req model.ShortenURLRequest) (response.ShortenURLResponse, error) {
 	longURL, err := validateLongURL(req.URL, ss.baseURL)
 	if err != nil {
-		return "", err
+		return response.ShortenURLResponse{}, err
 	}
 
 	for attempt := range maxCodeAttempts {
 		code := ss.util.GenerateShortURL(saltedURL(longURL, attempt))
 		storedURL, err := ss.repo.SaveShortURL(ctx, longURL, code)
 		if err != nil {
-			return "", fmt.Errorf("saving short url: %w", err)
+			return response.ShortenURLResponse{}, fmt.Errorf("saving short url: %w", err)
 		}
 		// the code is ours, whether inserted now or by an earlier/concurrent request
 		if storedURL == longURL {
-			return ss.host + code, nil
+			return response.ShortenURLResponse{ShortURL: ss.host + code, Code: code}, nil
 		}
 		log.Printf("short code %q collides with another url (attempt %d of %d), retrying", code, attempt+1, maxCodeAttempts)
 	}
-	return "", fmt.Errorf("no free short code after %d attempts", maxCodeAttempts)
+	return response.ShortenURLResponse{}, fmt.Errorf("no free short code after %d attempts", maxCodeAttempts)
 }
 
 // saltedURL returns the hash input for an attempt. Attempt 0 is the URL itself, so
