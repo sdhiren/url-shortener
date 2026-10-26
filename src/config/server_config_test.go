@@ -2,7 +2,8 @@ package config
 
 import (
 	"bytes"
-	"log"
+	"encoding/json"
+	"log/slog"
 	"strconv"
 	"testing"
 
@@ -78,19 +79,24 @@ func TestLoadServerConfig_RedirectStatus(t *testing.T) {
 	}
 
 	// an invalid value is not fatal: it logs a warning and falls back to 302
-	for _, status := range []string{"200", "303", "404", "abc", "301.0", "-302"} {
+	for _, status := range []string{"200", "303", "404", "abc", "301.0", "-302", "3\n02 forged=line"} {
 		t.Run("invalid "+status, func(t *testing.T) {
 			var logs bytes.Buffer
-			original := log.Writer()
-			log.SetOutput(&logs)
-			t.Cleanup(func() { log.SetOutput(original) })
+			original := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(original) })
 			setServerEnv(t, map[string]string{"REDIRECT_STATUS": status})
 
 			cfg, err := LoadServerConfig()
 
 			require.NoError(t, err)
 			assert.Equal(t, 302, cfg.RedirectStatus)
-			assert.Contains(t, logs.String(), `invalid REDIRECT_STATUS "`+status+`": must be one of 301, 302, 307, 308; using 302`)
+			var entry map[string]any
+			require.NoError(t, json.Unmarshal(logs.Bytes(), &entry))
+			assert.Equal(t, "WARN", entry["level"])
+			assert.Equal(t, "invalid REDIRECT_STATUS, using 302", entry["msg"])
+			assert.Equal(t, status, entry["value"])
+			assert.Equal(t, "301, 302, 307, 308", entry["allowed"])
 		})
 	}
 }

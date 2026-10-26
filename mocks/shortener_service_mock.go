@@ -12,8 +12,8 @@ package mocks
 import (
 	context "context"
 	reflect "reflect"
-	model "urlshortener/model/request"
-	model0 "urlshortener/model/response"
+	request "urlshortener/model/request"
+	response "urlshortener/model/response"
 
 	gomock "go.uber.org/mock/gomock"
 )
@@ -73,10 +73,10 @@ func (mr *MockShortenServiceMockRecorder) ResolveShortURL(ctx, code any) *gomock
 }
 
 // Shorten mocks base method.
-func (m *MockShortenService) Shorten(ctx context.Context, req model.ShortenURLRequest) (model0.ShortenURLResponse, error) {
+func (m *MockShortenService) Shorten(ctx context.Context, req request.ShortenURLRequest) (response.ShortenURLResponse, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Shorten", ctx, req)
-	ret0, _ := ret[0].(model0.ShortenURLResponse)
+	ret0, _ := ret[0].(response.ShortenURLResponse)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

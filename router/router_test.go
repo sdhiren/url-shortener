@@ -1,11 +1,17 @@
 package router
 
 import (
+	"bytes"
 	"database/sql"
+	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"urlshortener/src/logging"
 	"urlshortener/src/util"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -32,7 +38,11 @@ func newTestRouterWithRedirectStatus(t *testing.T, baseURL string, redirectStatu
 		assert.NoError(t, mock.ExpectationsWereMet())
 		db.Close()
 	})
-	return InitRouter(db, baseURL, redirectStatus), mock
+	return InitRouter(db, baseURL, redirectStatus, discardLogger()), mock
+}
+
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
 func serve(r *gin.Engine, method, path, body string) *httptest.ResponseRecorder {
@@ -65,7 +75,7 @@ func TestInitRouter_RegistersRoutes(t *testing.T) {
 		t.Run(tt.baseURL, func(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 
-			r := InitRouter(&sql.DB{}, tt.baseURL, 0)
+			r := InitRouter(&sql.DB{}, tt.baseURL, 0, discardLogger())
 
 			assert.ElementsMatch(t, tt.want, routesOf(r))
 		})
@@ -333,4 +343,54 @@ func TestRouter_UnknownRouteReturnsNotFound(t *testing.T) {
 			assert.Equal(t, http.StatusNotFound, serve(r, http.MethodGet, path, "").Code)
 		})
 	}
+}
+
+func TestInitRouter_LogsRequestsWithRequestID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var logs bytes.Buffer
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+	require.NoError(t, err)
+	defer db.Close()
+	mock.ExpectQuery(recordClickQuery).WithArgs("Lc4KTFBE").
+		WillReturnRows(sqlmock.NewRows([]string{"long_url"}).AddRow("https://example.com/a"))
+	r := InitRouter(db, "https://sho.rt/", 0, slog.New(slog.NewJSONHandler(&logs, nil)))
+
+	recorder := serve(r, http.MethodGet, "/Lc4KTFBE", "")
+
+	assert.Equal(t, http.StatusFound, recorder.Code)
+	requestID := recorder.Header().Get("X-Request-ID")
+	assert.Regexp(t, `^[0-9a-f]{32}$`, requestID)
+	var entry map[string]any
+	require.NoError(t, json.Unmarshal(logs.Bytes(), &entry))
+	assert.Equal(t, "request", entry["msg"])
+	assert.Equal(t, "/:code", entry["route"])
+	assert.InDelta(t, 302, entry["status"], 0)
+	assert.Equal(t, requestID, entry["request_id"])
+}
+
+func TestRecoverPanic_ReturnsGeneric500AndLogsPanic(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var logs bytes.Buffer
+	r := gin.New()
+	r.Use(logging.Middleware(slog.New(slog.NewJSONHandler(&logs, nil))), gin.CustomRecoveryWithWriter(io.Discard, recoverPanic))
+	r.GET("/panic", func(*gin.Context) { panic("boom: secret internal detail") })
+
+	recorder := serve(r, http.MethodGet, "/panic", "")
+
+	assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+	assert.JSONEq(t, `{"error": "internal server error"}`, recorder.Body.String())
+	assert.NotContains(t, recorder.Body.String(), "secret")
+
+	lines := strings.Split(strings.TrimSpace(logs.String()), "\n")
+	require.Len(t, lines, 2)
+	var panicEntry, requestEntry map[string]any
+	require.NoError(t, json.Unmarshal([]byte(lines[0]), &panicEntry))
+	require.NoError(t, json.Unmarshal([]byte(lines[1]), &requestEntry))
+	assert.Equal(t, "panic recovered", panicEntry["msg"])
+	assert.Equal(t, "ERROR", panicEntry["level"])
+	assert.Equal(t, "boom: secret internal detail", panicEntry["panic"])
+	assert.Contains(t, panicEntry["stack"], "router_test.go")
+	assert.Equal(t, recorder.Header().Get("X-Request-ID"), panicEntry["request_id"])
+	assert.Equal(t, "ERROR", requestEntry["level"])
+	assert.InDelta(t, 500, requestEntry["status"], 0)
 }

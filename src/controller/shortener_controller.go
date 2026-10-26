@@ -2,11 +2,12 @@ package controller
 
 import (
 	"errors"
-	"log"
 	"net/http"
-	model "urlshortener/model/request"
-	response "urlshortener/model/response"
+
+	"urlshortener/model/request"
+	"urlshortener/model/response"
 	"urlshortener/src/domain"
+	"urlshortener/src/logging"
 	"urlshortener/src/service"
 
 	"github.com/gin-gonic/gin"
@@ -35,7 +36,7 @@ func NewShortenerController(service service.ShortenService, redirectStatus int) 
 }
 
 func (sc *ShortenerController) Shorten(c *gin.Context) {
-	var shortenURLRequest model.ShortenURLRequest
+	var shortenURLRequest request.ShortenURLRequest
 	if err := c.ShouldBindJSON(&shortenURLRequest); err != nil {
 		var validationErrs validator.ValidationErrors
 		if errors.As(err, &validationErrs) {
@@ -51,7 +52,8 @@ func (sc *ShortenerController) Shorten(c *gin.Context) {
 		return
 	}
 
-	shortened, err := sc.service.Shorten(c, shortenURLRequest)
+	// c.Request.Context() (not c itself) is canceled when the client goes away
+	shortened, err := sc.service.Shorten(c.Request.Context(), shortenURLRequest)
 	if err != nil {
 		respondWithError(c, err)
 		return
@@ -69,7 +71,7 @@ func (sc *ShortenerController) Redirect(c *gin.Context) {
 	if c.Request.Method == http.MethodHead {
 		resolve = sc.service.LookupShortURL
 	}
-	longURL, err := resolve(c, c.Param("code"))
+	longURL, err := resolve(c.Request.Context(), c.Param("code"))
 	if err != nil {
 		respondWithError(c, err)
 		return
@@ -83,7 +85,7 @@ func (sc *ShortenerController) Redirect(c *gin.Context) {
 // redirecting or counting a click.
 func (sc *ShortenerController) Lookup(c *gin.Context) {
 	code := c.Param("code")
-	longURL, err := sc.service.LookupShortURL(c, code)
+	longURL, err := sc.service.LookupShortURL(c.Request.Context(), code)
 	if err != nil {
 		respondWithError(c, err)
 		return
@@ -104,6 +106,6 @@ func respondWithError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, response.ErrorResponse{Error: errURLNotFound})
 		return
 	}
-	log.Printf("%s %s: %v", c.Request.Method, c.Request.URL.Path, err)
+	logging.FromContext(c.Request.Context()).Error("request failed", "error", err)
 	c.JSON(http.StatusInternalServerError, response.ErrorResponse{Error: errInternalServer})
 }

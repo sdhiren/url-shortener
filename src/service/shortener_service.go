@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/url"
 	"strconv"
-	model "urlshortener/model/request"
-	response "urlshortener/model/response"
+
+	"urlshortener/model/request"
+	"urlshortener/model/response"
 	"urlshortener/src/domain"
+	"urlshortener/src/logging"
 	"urlshortener/src/repository"
 	"urlshortener/src/util"
 )
@@ -19,7 +20,7 @@ import (
 type ShortenService interface {
 	// Shorten validates req.URL and returns its short link and code, creating them
 	// unless this URL was shortened before. Invalid URLs return a *domain.InvalidURLError.
-	Shorten(ctx context.Context, req model.ShortenURLRequest) (response.ShortenURLResponse, error)
+	Shorten(ctx context.Context, req request.ShortenURLRequest) (response.ShortenURLResponse, error)
 	// ResolveShortURL records a click on code and returns its long URL, or
 	// domain.ErrURLNotFound if the code is malformed or unknown.
 	ResolveShortURL(ctx context.Context, code string) (string, error)
@@ -53,7 +54,7 @@ func NewShortenerService(host string, repo repository.ShortenerRepository, util 
 	return &shortenService{host: host, baseURL: baseURL, repo: repo, util: util}
 }
 
-func (ss *shortenService) Shorten(ctx context.Context, req model.ShortenURLRequest) (response.ShortenURLResponse, error) {
+func (ss *shortenService) Shorten(ctx context.Context, req request.ShortenURLRequest) (response.ShortenURLResponse, error) {
 	longURL, err := validateLongURL(req.URL, ss.baseURL)
 	if err != nil {
 		return response.ShortenURLResponse{}, err
@@ -69,7 +70,8 @@ func (ss *shortenService) Shorten(ctx context.Context, req model.ShortenURLReque
 		if storedURL == longURL {
 			return response.ShortenURLResponse{ShortURL: ss.host + code, Code: code}, nil
 		}
-		log.Printf("short code %q collides with another url (attempt %d of %d), retrying", code, attempt+1, maxCodeAttempts)
+		logging.FromContext(ctx).Warn("short code collides with another url, retrying",
+			"code", code, "attempt", attempt+1, "max_attempts", maxCodeAttempts)
 	}
 	return response.ShortenURLResponse{}, fmt.Errorf("no free short code after %d attempts", maxCodeAttempts)
 }

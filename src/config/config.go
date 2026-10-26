@@ -3,7 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -119,7 +119,8 @@ func redirectStatus(value string) int {
 	}
 	status, err := strconv.Atoi(value)
 	if err != nil || !validRedirectStatuses[status] {
-		log.Printf("invalid REDIRECT_STATUS %q: must be one of 301, 302, 307, 308; using 302", value) //nolint:gosec // G706: %q escapes newlines and control characters
+		// slog stores value as an escaped attribute, so it can't forge log lines
+		slog.Warn("invalid REDIRECT_STATUS, using 302", "value", value, "allowed", "301, 302, 307, 308")
 		return http.StatusFound
 	}
 	return status

@@ -26,6 +26,7 @@ You send it a long URL and it gives you a short link; opening the short link red
 - Hash collisions are detected and resolved, so a short link can never be taken over by a different URL (see [How short codes work](#how-short-codes-work)).
 - Strict URL validation, with a clear reason when a URL is rejected (see [URL validation rules](#url-validation-rules)).
 - JSON errors with proper HTTP status codes; internal errors are logged, never sent to clients.
+- Structured logs with `log/slog` (JSON in release mode), one line per request, and a request ID (`X-Request-ID`) on every response and log line.
 - Typed, validated configuration from environment variables: the service lists every invalid setting at startup.
 - Database schema managed with Liquibase migrations.
 - Runs locally with one command through Docker Compose.
@@ -55,6 +56,7 @@ Each layer depends only on the interface of the layer below, so the tests use ge
 | `src/util/` | Short code generation (first 8 characters of a base64url SHA-256 hash; see [How short codes work](#how-short-codes-work)) |
 | `src/config/` | Loads and validates configuration from the environment |
 | `src/domain/` | Domain errors shared across layers |
+| `src/logging/` | `slog` setup, request-ID and request-logging middleware, request-scoped logger in `context.Context` |
 | `model/request/`, `model/response/` | JSON request and response bodies |
 | `mocks/` | Generated mocks (`make generate`); don't edit by hand |
 | `infrastructure/changelog/` | Liquibase changelog and SQL migrations |
@@ -125,7 +127,7 @@ All configuration comes from environment variables. With Docker Compose they are
 |---|---|---|---|
 | `PORT` | no | `8080` | 1–65535 |
 | `BASE_URL` | no | `http://localhost:<PORT>/` | absolute `http`/`https` URL, no credentials, query or fragment, path not `/url/`; a trailing `/` is added if missing |
-| `APP_MODE` | no | `release` | `debug`, `release`, `test` |
+| `APP_MODE` | no | `release` | `debug`, `release`, `test`; also selects the log format |
 | `REDIRECT_STATUS` | no | `302` | `301`, `302`, `307`, `308`; any other value logs a warning and uses `302` |
 | `DB_USER` | yes | | |
 | `DB_PASSWORD` | yes | | wrap in single quotes in `.env` if it contains `$` |
@@ -147,6 +149,30 @@ Invalid configuration:
 invalid PORT "abc": must be a number between 1 and 65535
 missing required environment variables: DB_USER, DB_PASSWORD, DB_HOST, DB_NAME
 ```
+
+## Logging
+
+The service logs with Go's `log/slog` to stdout:
+
+- **`APP_MODE=release`**: one JSON object per line, ready for a log collector.
+- **`debug` / `test`**: human-readable `key=value` text.
+
+Every request gets an ID. A valid incoming `X-Request-ID` header is reused (1–64 characters of `A–Z a–z 0–9 . _ -`); otherwise a random 32-character hex ID is generated. Either way it's returned in the `X-Request-ID` response header and added to every log line for that request, so a client-reported ID leads straight to the logs.
+
+Each request ends with one `request` line:
+
+```json
+{"time":"…","level":"INFO","msg":"request","request_id":"b0ce5157…","method":"GET","path":"/9bs-5Xvc","route":"/:code","status":302,"duration_ms":1,"client_ip":"192.168.65.1","bytes":47}
+```
+
+- Requests with a 5xx status log at `ERROR`; everything else logs at `INFO`.
+- Unexpected errors add a `request failed` line with the full error chain, which is never sent to the client.
+- Short-code collisions log a `WARN` line.
+- A panic in a handler is recovered into a generic 500 and logged with its stack trace.
+
+Code that has a request context logs with `logging.FromContext(ctx)`, so the request ID is included automatically.
+
+If the configuration is invalid, the service prints the problems as plain text to stderr and exits, because the log format isn't known until the configuration loads.
 
 ## API reference
 
@@ -299,7 +325,8 @@ Dependabot ([config](.github/dependabot.yml)) opens weekly PRs for Go modules, G
 - `main` is protected: all changes go through a pull request, and PRs are squash-merged.
 - Use one branch and one PR per backlog item.
 - Commit messages and PR titles use the style `Dhiren: <short lowercase summary>`. With squash merges, the PR title becomes the commit on `main`.
-- Before opening a PR, run `make lint test check-generate tidy-check`.
+- Before opening a PR, run `make lint test check-generate tidy-check`. `golangci-lint fmt` fixes formatting and import grouping (standard library, third-party, then `urlshortener/...`).
+- Pass `c.Request.Context()` from handlers, not the `*gin.Context`: only the request context is canceled when the client disconnects.
 - Never commit secrets. Put them in `.env`, which is gitignored. CI scans every PR for leaks.
 - If a change affects setup, configuration or the API, update this README in the same PR.
 

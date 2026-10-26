@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
 	"urlshortener/src/domain"
 
 	"github.com/stretchr/testify/assert"

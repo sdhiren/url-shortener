@@ -3,41 +3,54 @@ package main
 import (
 	"database/sql"
 	"fmt"
-	"log"
-	"urlshortener/router"
-	"urlshortener/src/config"
+	"log/slog"
+	"os"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
+
+	"urlshortener/router"
+	"urlshortener/src/config"
+	"urlshortener/src/logging"
 )
 
 func main() {
-
-	// var db *sql.DB
-
-	fmt.Println("starting service")
-
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatal("Invalid configuration:\n", err)
+		// the log format depends on the config, so report config problems as plain text
+		fmt.Fprintf(os.Stderr, "Invalid configuration:\n%v\n", err)
+		os.Exit(1)
 	}
-	gin.SetMode(cfg.Server.Mode)
 
+	gin.SetMode(cfg.Server.Mode)
+	logger := logging.New(cfg.Server.Mode, os.Stdout)
+	slog.SetDefault(logger)
+
+	if err := run(cfg, logger); err != nil {
+		logger.Error("server stopped", "error", err)
+		os.Exit(1)
+	}
+}
+
+// run connects to the database and serves HTTP until the server fails. It is
+// separate from main so deferred cleanup runs before the process exits.
+func run(cfg config.Config, logger *slog.Logger) error {
 	db, err := sql.Open("postgres", cfg.DB.DSN())
 	if err != nil {
-		log.Fatal("Error connecting to the database:", err)
+		return fmt.Errorf("opening database: %w", err)
 	}
 	defer db.Close()
 
-	// Ping the database to verify the connection
-	err = db.Ping()
-	if err != nil {
-		log.Fatal("Error pinging the database:", err)
+	if err := db.Ping(); err != nil {
+		return fmt.Errorf("connecting to database: %w", err)
 	}
 
-	r := router.InitRouter(db, cfg.Server.BaseURL, cfg.Server.RedirectStatus)
-	log.Printf("listening on %s, short links use %s and redirect with %d", cfg.Server.Addr(), cfg.Server.BaseURL, cfg.Server.RedirectStatus)
-	if err := r.Run(cfg.Server.Addr()); err != nil {
-		log.Fatal("Server stopped: ", err)
-	}
+	r := router.InitRouter(db, cfg.Server.BaseURL, cfg.Server.RedirectStatus, logger)
+	logger.Info("listening",
+		"addr", cfg.Server.Addr(),
+		"base_url", cfg.Server.BaseURL,
+		"redirect_status", cfg.Server.RedirectStatus,
+		"mode", cfg.Server.Mode,
+	)
+	return r.Run(cfg.Server.Addr())
 }
