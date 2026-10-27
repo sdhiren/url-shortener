@@ -52,7 +52,7 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
 
 ## P1 — Testing
 
-- [ ] **T-01 · Repository integration tests (M)**: every repository method is covered with exact-SQL `go-sqlmock` tests (100%). Still to do: run them against a real Postgres (`testcontainers-go`) so the SQL itself is checked.
+- [ ] **T-01 · Repository integration tests (M)**: every repository method is covered with exact-SQL `go-sqlmock` tests (100%). Partly done in P-11: `src/repository/shortener_repository_integration_test.go` (build tag `integration`, `make test-integration`) runs every repository method against a real Postgres when `TEST_DATABASE_URL` is set, each test in its own schema with the migrations applied. Still to do: start Postgres from the test itself (`testcontainers-go`) and add a CI job for it.
 - [x] **T-02 · Expand service/controller tests (S)**: done. Every package is at 100%, including redirect/HEAD tests and router tests that send real HTTP requests through every layer to sqlmock.
 - [ ] **T-03 · End-to-end API test (M)**: spin up the router plus a real DB, then shorten, redirect, and assert the counter.
 - [x] **T-04 · Race detector & coverage in CI (S)**: done in P-06: `make coverage` runs `go test -race` and fails below 80% total (excluding mocks and `main.go`).
@@ -65,7 +65,7 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
 - [ ] **P-02 · Health endpoints (S)**: `/healthz` (liveness) and `/readyz` (pings the DB). Wire them into the compose healthcheck.
 - [ ] **P-03 · Production Dockerfile (S)**: multi-stage build, a static binary with `CGO_ENABLED=0`, a `distroless`/`scratch` runtime, a non-root user, and pinned base image versions. *(The `.dockerignore` was added in B-01.)*
 - [ ] **P-04 · Compose fixes (S)**: the API should wait for Liquibase (`condition: service_completed_successfully`). Pin `postgres` and `liquibase` versions, drop the obsolete `version:` key, and don't publish the DB port by default. *(Partly done in P-06: the API now waits for Liquibase to finish, and Liquibase gets its credentials as arguments, since Liquibase Community 4.9 ignores `LIQUIBASE_COMMAND_*` env vars, so B-01 had silently broken migrations.)*
-- [x] **P-05 · Migrations (S)**: done in migration 003: duplicates merged, unique constraint on `SHORT_URL`, and a `CREATED_AT` column. Decided against the rest: no `LONG_URL` index (nothing queries by long URL any more, and a btree index fails on long multi-byte URLs); `EXPIRES_AT` belongs to F-02; and changeset 001's `author` can't be changed, because Liquibase would treat it as a new changeset. Replacing Liquibase is still optional.
+- [x] **P-05 · Migrations (S)**: done in migration 003: duplicates merged, unique constraint on `SHORT_URL`, and a `CREATED_AT` column. Decided against the rest: no `LONG_URL` index (nothing queries by long URL any more, and a btree index fails on long multi-byte URLs; revised in P-11, which adds a unique index on `md5(LONG_URL)`); `EXPIRES_AT` belongs to F-02; and changeset 001's `author` can't be changed, because Liquibase would treat it as a new changeset. Replacing Liquibase is still optional.
 - [x] **P-06 · CI pipeline with GitHub Actions (M)**: done. `.github/workflows/ci.yml` runs on PRs and on pushes to `main`, with Go from `go.mod`, caching, concurrency cancelling and read-only permissions:
   - **Lint:** `make tidy-check`, `make check-generate`, `go vet`, golangci-lint v2.14.0.
   - **Test:** `make coverage` (race detector, 80% gate), coverage table in the run summary, report uploaded as an artifact.
@@ -77,6 +77,8 @@ Size: **S** < 1h · **M** a few hours · **L** a day or more.
 - [ ] **P-08 · Observability (M)**: Prometheus `/metrics` (request latency, status codes, shortens and redirects), optional OpenTelemetry tracing.
 - [ ] **P-09 · Security headers & CORS (S)**: CORS config for a frontend, `gin.SetTrustedProxies`, and a request body size limit.
 - [ ] **P-10 · API docs (S)**: an OpenAPI/Swagger spec (`swaggo`) served at `/swagger`, linked from the README (D-01).
+- [x] **P-11 · Single-statement shorten and one row per long URL (M)**: done (US-3). Migration 004 adds a unique index `ux_urls_long_url_md5` on `md5(LONG_URL)` (md5 keeps entries small, so long multi-byte URLs can't exceed the btree entry limit). Its precondition halts the migration if two rows share an md5, because each has its own, possibly published, code. Shortening is now one `INSERT … ON CONFLICT ((md5(LONG_URL))) DO UPDATE … RETURNING SHORT_URL, LONG_URL` for new and existing URLs alike. The old flow needed a second `SELECT` whenever the code already existed. A URL shortened before gets its stored code back, even a salted one. A code owned by a different URL fails with a unique violation on `urls_short_url_key`, which the repository maps to `ErrShortURLTaken`, and the service retries with `GenerateShortURL(url, attempt)` (attempt 0 unchanged). Lookups and clicks already used the `SHORT_URL` unique index from migration 003; integration tests check both plans with `EXPLAIN`.
+  - Deviations from the US-3 proposal: no separate `ux_urls_short_url` index (003's `urls_short_url_key` already is one), no de-duplication step (003 already merged duplicates, and any remaining ones have different codes), and shortening doesn't increment a counter, because `CLICK_COUNT` counts clicks since B-06.
 
 ---
 

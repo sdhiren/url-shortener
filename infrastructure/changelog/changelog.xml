@@ -12,4 +12,16 @@
     <changeSet id="003" author="dhiren">
         <sqlFile path="./liquibase/changelog/sql/003_unique_short_url_and_created_at.sql"/>
     </changeSet>
+    <changeSet id="004" author="dhiren">
+        <preConditions onFail="HALT"
+                       onFailMessage="URLS has rows sharing md5(LONG_URL) (the same URL under different codes, or an md5 collision). Each of their codes may be published, so resolve them by hand before running this migration.">
+            <sqlCheck expectedResult="0">
+                SELECT COUNT(*) FROM (SELECT 1 FROM URLS GROUP BY md5(LONG_URL) HAVING COUNT(*) &gt; 1) d
+            </sqlCheck>
+        </preConditions>
+        <sqlFile path="./liquibase/changelog/sql/004_unique_long_url_md5.sql"/>
+        <rollback>
+            DROP INDEX ux_urls_long_url_md5;
+        </rollback>
+    </changeSet>
 </databaseChangeLog>

@@ -19,6 +19,13 @@ migrate:
 test:
 	go test -race -cover ./...
 
+# Runs the unit tests plus the integration tests against a real Postgres, e.g. the
+# compose one: TEST_DATABASE_URL=postgres://user:pass@localhost:5432/main?sslmode=disable
+# Each test applies the migrations in its own schema and drops it afterwards.
+test-integration:
+	@test -n "$(TEST_DATABASE_URL)" || (echo "TEST_DATABASE_URL is not set, see the README" && exit 1)
+	go test -race -count=1 -tags integration ./...
+
 generate:
 	go generate ./...
 

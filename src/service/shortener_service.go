@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"strconv"
 
 	"urlshortener/model/request"
 	"urlshortener/model/response"
@@ -61,29 +60,21 @@ func (ss *shortenService) Shorten(ctx context.Context, req request.ShortenURLReq
 	}
 
 	for attempt := range maxCodeAttempts {
-		code := ss.util.GenerateShortURL(saltedURL(longURL, attempt))
-		storedURL, err := ss.repo.SaveShortURL(ctx, longURL, code)
+		code := ss.util.GenerateShortURL(longURL, attempt)
+		// the stored code, not our candidate: a URL shortened before (or concurrently,
+		// or after a collision) keeps the code it already has
+		storedCode, err := ss.repo.SaveShortURL(ctx, longURL, code)
+		if errors.Is(err, repository.ErrShortURLTaken) {
+			logging.FromContext(ctx).Warn("short code collides with another url, retrying",
+				"code", code, "attempt", attempt+1, "max_attempts", maxCodeAttempts)
+			continue
+		}
 		if err != nil {
 			return response.ShortenURLResponse{}, fmt.Errorf("saving short url: %w", err)
 		}
-		// the code is ours, whether inserted now or by an earlier/concurrent request
-		if storedURL == longURL {
-			return response.ShortenURLResponse{ShortURL: ss.host + code, Code: code}, nil
-		}
-		logging.FromContext(ctx).Warn("short code collides with another url, retrying",
-			"code", code, "attempt", attempt+1, "max_attempts", maxCodeAttempts)
+		return response.ShortenURLResponse{ShortURL: ss.host + storedCode, Code: storedCode}, nil
 	}
 	return response.ShortenURLResponse{}, fmt.Errorf("no free short code after %d attempts", maxCodeAttempts)
-}
-
-// saltedURL returns the hash input for an attempt. Attempt 0 is the URL itself, so
-// codes stay stable; later attempts append a salt to get a different code after a
-// collision. It's deterministic, so shortening the same URL again finds the same code.
-func saltedURL(longURL string, attempt int) string {
-	if attempt == 0 {
-		return longURL
-	}
-	return longURL + "\x00" + strconv.Itoa(attempt)
 }
 
 func (ss *shortenService) ResolveShortURL(ctx context.Context, code string) (string, error) {
