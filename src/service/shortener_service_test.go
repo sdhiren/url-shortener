@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -15,8 +16,8 @@ import (
 	"urlshortener/model/response"
 	"urlshortener/src/domain"
 	"urlshortener/src/logging"
+	"urlshortener/src/repository"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 )
@@ -57,12 +58,11 @@ func shortened(code string) response.ShortenURLResponse {
 	return response.ShortenURLResponse{ShortURL: host + code, Code: code}
 }
 
-func (suite *shortenServiceTestSuite) Test_Shorten_ShouldReturnShortURL_WhenCodeIsStoredForThisURL() {
-	// covers both a fresh insert and a URL shortened before; the repository returns longURL in both cases
+func (suite *shortenServiceTestSuite) Test_Shorten_ShouldReturnShortURL_WhenCodeIsInserted() {
 	req := request.ShortenURLRequest{URL: longURL}
 
-	suite.mockUtil.EXPECT().GenerateShortURL(longURL).Return(shortURL).Times(1)
-	suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, shortURL).Return(longURL, nil).Times(1)
+	suite.mockUtil.EXPECT().GenerateShortURL(longURL, 0).Return(shortURL).Times(1)
+	suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, shortURL).Return(shortURL, nil).Times(1)
 
 	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
 
@@ -70,39 +70,69 @@ func (suite *shortenServiceTestSuite) Test_Shorten_ShouldReturnShortURL_WhenCode
 	suite.Equal(response.ShortenURLResponse{ShortURL: host + shortURL, Code: shortURL}, actualResult)
 }
 
-func (suite *shortenServiceTestSuite) Test_Shorten_ShouldRetryWithSaltedCode_WhenCodeCollidesWithAnotherURL() {
+func (suite *shortenServiceTestSuite) Test_Shorten_ShouldReturnStoredCodeWithoutRetrying_WhenURLWasShortenedBefore() {
+	// e.g. the URL got a salted code after a collision earlier: the repository returns
+	// that code, which wins over the attempt-0 candidate
 	req := request.ShortenURLRequest{URL: longURL}
-	otherURL := "https://other.example.com"
 
-	gomock.InOrder(
-		suite.mockUtil.EXPECT().GenerateShortURL(longURL).Return(shortURL),
-		suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, shortURL).Return(otherURL, nil),
-		suite.mockUtil.EXPECT().GenerateShortURL(longURL+"\x001").Return("Salted01"),
-		suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, "Salted01").Return(longURL, nil),
-	)
+	suite.mockUtil.EXPECT().GenerateShortURL(longURL, 0).Return(shortURL).Times(1)
+	suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, shortURL).Return("OLDCODE1", nil).Times(1)
 
 	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
 
 	suite.NoError(err)
-	suite.Equal(shortened("Salted01"), actualResult)
+	suite.Equal(shortened("OLDCODE1"), actualResult)
 }
 
-func (suite *shortenServiceTestSuite) Test_Shorten_ShouldFindSaltedCodeAgain_WhenCollidedURLIsShortenedAgain() {
-	// a URL that got a salted code earlier walks the same deterministic sequence and
-	// stops at its own code instead of creating a new row
+func (suite *shortenServiceTestSuite) Test_Shorten_ShouldRetryWithSaltedCode_WhenCodeIsTaken() {
 	req := request.ShortenURLRequest{URL: longURL}
 
 	gomock.InOrder(
-		suite.mockUtil.EXPECT().GenerateShortURL(longURL).Return(shortURL),
-		suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, shortURL).Return("https://other.example.com", nil),
-		suite.mockUtil.EXPECT().GenerateShortURL(longURL+"\x001").Return("Salted01"),
-		suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, "Salted01").Return(longURL, nil),
+		suite.mockUtil.EXPECT().GenerateShortURL(longURL, 0).Return("AAAAAAAA"),
+		suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, "AAAAAAAA").Return("", repository.ErrShortURLTaken),
+		suite.mockUtil.EXPECT().GenerateShortURL(longURL, 1).Return("BBBBBBBB"),
+		suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, "BBBBBBBB").Return("BBBBBBBB", nil),
 	)
 
 	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
 
 	suite.NoError(err)
-	suite.Equal(shortened("Salted01"), actualResult)
+	suite.Equal(shortened("BBBBBBBB"), actualResult)
+}
+
+func (suite *shortenServiceTestSuite) Test_Shorten_ShouldRetry_WhenRepositoryWrapsErrShortURLTaken() {
+	req := request.ShortenURLRequest{URL: longURL}
+	wrapped := fmt.Errorf("saving short url %q: %w", "AAAAAAAA", repository.ErrShortURLTaken)
+
+	gomock.InOrder(
+		suite.mockUtil.EXPECT().GenerateShortURL(longURL, 0).Return("AAAAAAAA"),
+		suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, "AAAAAAAA").Return("", wrapped),
+		suite.mockUtil.EXPECT().GenerateShortURL(longURL, 1).Return("BBBBBBBB"),
+		suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, "BBBBBBBB").Return("BBBBBBBB", nil),
+	)
+
+	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
+
+	suite.NoError(err)
+	suite.Equal(shortened("BBBBBBBB"), actualResult)
+}
+
+func (suite *shortenServiceTestSuite) Test_Shorten_ShouldReturnStoredCode_WhenConcurrentRequestStoredURLDuringRetry() {
+	// a concurrent request inserted this URL under the attempt-0 code, so attempt 0 hit the
+	// code's unique constraint; attempt 1 finds the stored row and returns its code, not "BBBBBBBB"
+	req := request.ShortenURLRequest{URL: longURL}
+
+	gomock.InOrder(
+		suite.mockUtil.EXPECT().GenerateShortURL(longURL, 0).Return("AAAAAAAA"),
+		suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, "AAAAAAAA").Return("", repository.ErrShortURLTaken),
+		suite.mockUtil.EXPECT().GenerateShortURL(longURL, 1).Return("BBBBBBBB"),
+		suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, "BBBBBBBB").Return("AAAAAAAA", nil),
+	)
+
+	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
+
+	suite.NoError(err)
+	suite.Equal(shortened("AAAAAAAA"), actualResult)
 }
 
 func (suite *shortenServiceTestSuite) Test_Shorten_ShouldReturnError_WhenAllAttemptsCollide() {
@@ -110,8 +140,8 @@ func (suite *shortenServiceTestSuite) Test_Shorten_ShouldReturnError_WhenAllAtte
 
 	for attempt := range maxCodeAttempts {
 		code := "Code000" + strconv.Itoa(attempt)
-		suite.mockUtil.EXPECT().GenerateShortURL(saltedURL(longURL, attempt)).Return(code).Times(1)
-		suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, code).Return("https://other.example.com", nil).Times(1)
+		suite.mockUtil.EXPECT().GenerateShortURL(longURL, attempt).Return(code).Times(1)
+		suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, code).Return("", repository.ErrShortURLTaken).Times(1)
 	}
 
 	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
@@ -127,7 +157,8 @@ func (suite *shortenServiceTestSuite) Test_Shorten_ShouldStopAndReturnWrappedErr
 	dbErr := errors.New("db error")
 	req := request.ShortenURLRequest{URL: longURL}
 
-	suite.mockUtil.EXPECT().GenerateShortURL(longURL).Return(shortURL).Times(1)
+	// Times(1): a generic database error is not retried
+	suite.mockUtil.EXPECT().GenerateShortURL(longURL, 0).Return(shortURL).Times(1)
 	suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, shortURL).Return("", dbErr).Times(1)
 
 	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
@@ -137,14 +168,26 @@ func (suite *shortenServiceTestSuite) Test_Shorten_ShouldStopAndReturnWrappedErr
 	suite.Empty(actualResult)
 }
 
+func (suite *shortenServiceTestSuite) Test_Shorten_ShouldNotRetry_WhenLongURLHashCollides() {
+	req := request.ShortenURLRequest{URL: longURL}
+
+	suite.mockUtil.EXPECT().GenerateShortURL(longURL, 0).Return(shortURL).Times(1)
+	suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, shortURL).Return("", repository.ErrLongURLHashCollision).Times(1)
+
+	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
+
+	suite.ErrorIs(err, repository.ErrLongURLHashCollision)
+	suite.Empty(actualResult)
+}
+
 func (suite *shortenServiceTestSuite) Test_Shorten_ShouldStopRetrying_WhenRepositoryFailsAfterCollision() {
 	dbErr := errors.New("db error")
 	req := request.ShortenURLRequest{URL: longURL}
 
 	gomock.InOrder(
-		suite.mockUtil.EXPECT().GenerateShortURL(longURL).Return(shortURL),
-		suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, shortURL).Return("https://other.example.com", nil),
-		suite.mockUtil.EXPECT().GenerateShortURL(longURL+"\x001").Return("Salted01"),
+		suite.mockUtil.EXPECT().GenerateShortURL(longURL, 0).Return(shortURL),
+		suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, shortURL).Return("", repository.ErrShortURLTaken),
+		suite.mockUtil.EXPECT().GenerateShortURL(longURL, 1).Return("Salted01"),
 		suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, "Salted01").Return("", dbErr),
 	)
 
@@ -156,7 +199,7 @@ func (suite *shortenServiceTestSuite) Test_Shorten_ShouldStopRetrying_WhenReposi
 func (suite *shortenServiceTestSuite) Test_Shorten_ShouldNotReturnErrorTextAsShortURL_WhenRepositoryFails() {
 	req := request.ShortenURLRequest{URL: longURL}
 
-	suite.mockUtil.EXPECT().GenerateShortURL(longURL).Return(shortURL).Times(1)
+	suite.mockUtil.EXPECT().GenerateShortURL(longURL, 0).Return(shortURL).Times(1)
 	suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, shortURL).Return("", errors.New("pq: connection refused")).Times(1)
 
 	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
@@ -261,7 +304,7 @@ func (suite *shortenServiceTestSuite) Test_Shorten_ShouldReturnInvalidURLErrorWi
 	for name, invalidURL := range invalidURLs {
 		suite.Run(name, func() {
 			suite.SetupTest()
-			suite.mockUtil.EXPECT().GenerateShortURL(gomock.Any()).Times(0)
+			suite.mockUtil.EXPECT().GenerateShortURL(gomock.Any(), gomock.Any()).Times(0)
 			suite.mockShortenerRepository.EXPECT().SaveShortURL(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 
 			actualResult, err := suite.shortenerService.Shorten(suite.context, request.ShortenURLRequest{URL: invalidURL})
@@ -276,8 +319,8 @@ func (suite *shortenServiceTestSuite) Test_Shorten_ShouldReturnInvalidURLErrorWi
 func (suite *shortenServiceTestSuite) Test_Shorten_ShouldUseTrimmedURL_WhenURLHasSurroundingWhitespace() {
 	req := request.ShortenURLRequest{URL: "  \t" + longURL + "\n "}
 
-	suite.mockUtil.EXPECT().GenerateShortURL(longURL).Return(shortURL).Times(1)
-	suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, shortURL).Return(longURL, nil).Times(1)
+	suite.mockUtil.EXPECT().GenerateShortURL(longURL, 0).Return(shortURL).Times(1)
+	suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, shortURL).Return(shortURL, nil).Times(1)
 
 	actualResult, err := suite.shortenerService.Shorten(suite.context, req)
 
@@ -289,8 +332,8 @@ func (suite *shortenServiceTestSuite) Test_Shorten_ShouldSkipSelfLinkCheck_WhenH
 	service := NewShortenerService("http://[::1", suite.mockShortenerRepository, suite.mockUtil)
 	req := request.ShortenURLRequest{URL: longURL}
 
-	suite.mockUtil.EXPECT().GenerateShortURL(longURL).Return(shortURL).Times(1)
-	suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, shortURL).Return(longURL, nil).Times(1)
+	suite.mockUtil.EXPECT().GenerateShortURL(longURL, 0).Return(shortURL).Times(1)
+	suite.mockShortenerRepository.EXPECT().SaveShortURL(suite.context, longURL, shortURL).Return(shortURL, nil).Times(1)
 
 	actualResult, err := service.Shorten(suite.context, req)
 
@@ -341,30 +384,16 @@ func (suite *shortenServiceTestSuite) Test_LookupShortURL_ShouldReturnErrURLNotF
 	}
 }
 
-func TestSaltedURL(t *testing.T) {
-	assert.Equal(t, "https://example.com", saltedURL("https://example.com", 0))
-	assert.Equal(t, "https://example.com\x001", saltedURL("https://example.com", 1))
-	assert.Equal(t, "https://example.com\x004", saltedURL("https://example.com", 4))
-	// deterministic: the same attempt always gives the same input
-	assert.Equal(t, saltedURL("https://example.com", 2), saltedURL("https://example.com", 2))
-	// every attempt gives a different input, so a different code
-	seen := map[string]bool{}
-	for attempt := range maxCodeAttempts {
-		seen[saltedURL("https://example.com", attempt)] = true
-	}
-	assert.Len(t, seen, maxCodeAttempts)
-}
-
 func (suite *shortenServiceTestSuite) Test_Shorten_ShouldLogCollisionWithRequestLogger() {
 	var logs bytes.Buffer
 	ctx := logging.WithLogger(suite.context, slog.New(slog.NewJSONHandler(&logs, nil)).With("request_id", "req-123"))
 	req := request.ShortenURLRequest{URL: longURL}
 
 	gomock.InOrder(
-		suite.mockUtil.EXPECT().GenerateShortURL(longURL).Return(shortURL),
-		suite.mockShortenerRepository.EXPECT().SaveShortURL(ctx, longURL, shortURL).Return("https://other.example.com", nil),
-		suite.mockUtil.EXPECT().GenerateShortURL(longURL+"\x001").Return("Salted01"),
-		suite.mockShortenerRepository.EXPECT().SaveShortURL(ctx, longURL, "Salted01").Return(longURL, nil),
+		suite.mockUtil.EXPECT().GenerateShortURL(longURL, 0).Return(shortURL),
+		suite.mockShortenerRepository.EXPECT().SaveShortURL(ctx, longURL, shortURL).Return("", repository.ErrShortURLTaken),
+		suite.mockUtil.EXPECT().GenerateShortURL(longURL, 1).Return("Salted01"),
+		suite.mockShortenerRepository.EXPECT().SaveShortURL(ctx, longURL, "Salted01").Return("Salted01", nil),
 	)
 
 	_, err := suite.shortenerService.Shorten(ctx, req)

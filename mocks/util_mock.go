@@ -40,15 +40,15 @@ func (m *MockUtil) EXPECT() *MockUtilMockRecorder {
 }
 
 // GenerateShortURL mocks base method.
-func (m *MockUtil) GenerateShortURL(longURL string) string {
+func (m *MockUtil) GenerateShortURL(longURL string, attempt int) string {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GenerateShortURL", longURL)
+	ret := m.ctrl.Call(m, "GenerateShortURL", longURL, attempt)
 	ret0, _ := ret[0].(string)
 	return ret0
 }
 
 // GenerateShortURL indicates an expected call of GenerateShortURL.
-func (mr *MockUtilMockRecorder) GenerateShortURL(longURL any) *gomock.Call {
+func (mr *MockUtilMockRecorder) GenerateShortURL(longURL, attempt any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateShortURL", reflect.TypeOf((*MockUtil)(nil).GenerateShortURL), longURL)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateShortURL", reflect.TypeOf((*MockUtil)(nil).GenerateShortURL), longURL, attempt)
 }
