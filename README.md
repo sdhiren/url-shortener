@@ -64,10 +64,11 @@ Each layer depends only on the interface of the layer below, so the tests use ge
 ### How short codes work
 
 1. The code is the first 8 characters of the base64url-encoded SHA-256 hash of the long URL, so the same URL always maps to the same code.
-2. The service runs `INSERT … ON CONFLICT (SHORT_URL) DO NOTHING`. The `SHORT_URL` column has a unique constraint, so exactly one row per code can exist.
-3. If the code was already taken, the service reads which URL owns it:
-   - **The same URL** (shortened earlier, or by a concurrent request): the existing link is returned. No duplicate row is created.
-   - **A different URL** (a hash collision): the service retries with a salted hash (`url + "\x00" + attempt`), up to 5 attempts. The first attempt is unsalted, so existing codes never change, and the salt sequence is deterministic, so shortening the same URL again finds its salted code. Collisions are logged.
+2. Shortening runs a single statement, `INSERT … ON CONFLICT ((md5(LONG_URL))) DO UPDATE … RETURNING SHORT_URL, LONG_URL`. Both `SHORT_URL` and `md5(LONG_URL)` have unique indexes, so there is exactly one row per code and one row per long URL.
+   - **A new URL**: the row is inserted and its code returned.
+   - **A URL shortened before** (earlier, or by a concurrent request): the stored code is returned and no row is added.
+   - **A new URL whose code belongs to a different URL** (a hash collision): the insert fails on the `SHORT_URL` constraint, and the service retries with a salted hash (`url + "\x00" + attempt`), up to 5 attempts. The first attempt is unsalted, so existing codes never change, and the salt sequence is deterministic. Collisions are logged.
+3. The index is on `md5(LONG_URL)` rather than the URL itself, because a btree entry is capped at about 2.7 kB and a 1000-character multi-byte URL can exceed it. If a different URL with the same md5 is stored (only possible with a deliberately crafted URL), the request fails instead of returning the other URL's code.
 
 With 48-bit codes a natural collision is very unlikely, but this also stops a deliberately planted row from taking over someone else's link.
 
@@ -283,6 +284,7 @@ set -a; source .env; set +a; DB_HOST=localhost go run .
 | `make start` / `make stop` / `make stopv` | Start / stop the Docker Compose stack (`stopv` also deletes the DB volume) |
 | `make migrate` | Run the Liquibase migrations against the Compose database |
 | `make test` | Run all tests with the race detector and coverage |
+| `make test-integration` | Also run the integration tests against Postgres; needs `TEST_DATABASE_URL` (see [Integration tests](#integration-tests)) |
 | `make coverage` | Run tests, write `coverage.out`, and fail if total coverage is below `COVERAGE_MIN` (80%) |
 | `make lint` | Run [golangci-lint](https://golangci-lint.run/) with `.golangci.yml` |
 | `make generate` | Regenerate mocks in `mocks/` with `mockgen` |
@@ -290,6 +292,18 @@ set -a; source .env; set +a; DB_HOST=localhost go run .
 | `make tidy-check` | Fail if `go.mod` / `go.sum` aren't tidy |
 | `make vuln` | Scan dependencies for known vulnerabilities with `govulncheck` |
 | `make deps-update` | Update all dependencies and tidy |
+
+### Integration tests
+
+`make test` needs no database. The integration tests (build tag `integration`) run the real SQL against Postgres: concurrent shortens of the same URL, hash collisions, clicks, and `EXPLAIN` checks that lookups use the unique indexes. Each test creates its own schema, applies the migrations from `infrastructure/changelog/sql`, and drops the schema afterwards. To run them against the Compose database:
+
+```bash
+docker compose up -d db
+set -a; source .env; set +a
+TEST_DATABASE_URL="postgres://$DB_USER:$DB_PASSWORD@localhost:5432/$DB_NAME?sslmode=disable" make test-integration
+```
+
+Without `TEST_DATABASE_URL` the integration tests are skipped.
 
 ### Mocks
 
@@ -304,6 +318,7 @@ Migrations live in `infrastructure/changelog/`. To add one, put a new SQL file i
 | `001` | Creates the `URLS` table |
 | `002` | Renames `COUNTER_VALUE` to `CLICK_COUNT` (default 0); old values reset, since they counted shorten requests |
 | `003` | Merges duplicate rows (summing clicks), keeps the oldest row of any collision, adds a unique constraint on `SHORT_URL`, and adds `CREATED_AT` |
+| `004` | Adds the unique index `ux_urls_long_url_md5` on `md5(LONG_URL)`. Its precondition halts the migration, changing nothing, if two rows share an md5. Rollback drops the index |
 
 Never edit a migration that has already been applied: Liquibase checksums each changeset, so changes go in a new file.
 
